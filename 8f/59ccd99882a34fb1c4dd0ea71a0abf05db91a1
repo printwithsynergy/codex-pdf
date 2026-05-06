@@ -1,0 +1,168 @@
+tests/test_extract_structural.py
+  3f0cdbd772e3e829 1-25
+schemas/v1/codex-transparency-tree.schema.json
+  3f0cdbd772e3e829 1-22
+.gitignore
+  3f0cdbd772e3e829 1-11
+tests/test_models.py
+  3f0cdbd772e3e829 1-18
+schemas/v1/codex-annotation.schema.json
+  3f0cdbd772e3e829 1-16
+schemas/v1/codex-issue.schema.json
+  3f0cdbd772e3e829 1-17
+docs/parity.md
+  s_3f0cdbd772e3e8::t_4fc0e1825bbc54 1-36
+schemas/v1/codex-preflight-report.schema.json
+  3f0cdbd772e3e829 1-16
+src/codex_pdf/extract/document.py
+  3f0cdbd772e3e829 1-97
+schemas/v1/codex-output-intent.schema.json
+  3f0cdbd772e3e829 1-12
+src/codex_pdf/extract/structure.py
+  3f0cdbd772e3e829 1-57
+schemas/CHANGELOG.md
+  3f0cdbd772e3e829 1-19
+src/codex_pdf/version.py
+  s_3f0cdbd772e3e8::t_4ac2d40321d8c7 3
+  3f0cdbd772e3e829 1-2
+docs/discovery-audit.md
+  s_3f0cdbd772e3e8::t_38a6a27f3eb312 1-7
+  3f0cdbd772e3e829 8-61
+scripts/parity_viewer_essentials.py
+  3f0cdbd772e3e829 1-41
+tests/test_schema.py
+  3f0cdbd772e3e829 1-11
+src/codex_pdf/extract/fonts.py
+  3f0cdbd772e3e829 1-50
+schemas/v1/codex-page.schema.json
+  3f0cdbd772e3e829 1-36
+tests/test_schemas_all.py
+  3f0cdbd772e3e829 1-11
+schemas/v1/codex-page-object.schema.json
+  3f0cdbd772e3e829 1-20
+src/codex_pdf/cli.py
+  3f0cdbd772e3e829 1-125
+README.md
+  s_3f0cdbd772e3e8::t_ec898060dc0f96 1-8,18,21,53-66
+  3f0cdbd772e3e829 9-17,19-20,22-52,67-70
+LICENSE
+  3f0cdbd772e3e829 1-7
+schemas/v1/codex-source.schema.json
+  3f0cdbd772e3e829 1-12
+tests/test_golden.py
+  3f0cdbd772e3e829 1-13
+tests/test_preflight_ingest.py
+  3f0cdbd772e3e829 1-42
+schemas/v1/codex-form-xobject.schema.json
+  3f0cdbd772e3e829 1-13
+tests/test_golden_corpus.py
+  3f0cdbd772e3e829 1-30
+docs/migration-plan.md
+  3f0cdbd772e3e829 8-32
+  s_3f0cdbd772e3e8::t_181eb157f4e523 1-7
+src/codex_pdf/extract/forms.py
+  3f0cdbd772e3e829 1-46
+src/codex_pdf/models/__init__.py
+  3f0cdbd772e3e829 1-5
+src/codex_pdf/extract/trapping.py
+  3f0cdbd772e3e829 1-46
+src/codex_pdf/extract/common.py
+  3f0cdbd772e3e829 1-31
+src/codex_pdf/preflight_ingest/adapters.py
+  3f0cdbd772e3e829 1-219
+docs/cleanup-stop-gates.md
+  3f0cdbd772e3e829 8-25
+  s_3f0cdbd772e3e8::t_81459c5e7019a7 1-7
+schemas/v1/codex-spot-colorant.schema.json
+  3f0cdbd772e3e829 1-13
+src/codex_pdf/extract/content_inventory.py
+  3f0cdbd772e3e829 1-68
+.github/workflows/ci.yml
+  3f0cdbd772e3e829 1-35
+docs/backward-compatibility.md
+  3f0cdbd772e3e829 8-24
+  s_3f0cdbd772e3e8::t_263f8381bb221b 1-7
+tests/golden/1.0.0/reference.json
+  3f0cdbd772e3e829 1-2,4-67
+  s_3f0cdbd772e3e8::t_3a8168f77b55f1 3
+schemas/v1/codex-image.schema.json
+  3f0cdbd772e3e829 1-28
+tests/test_parity.py
+  3f0cdbd772e3e829 1-115
+schemas/v1/codex-color-space.schema.json
+  3f0cdbd772e3e829 1-35
+docs/architecture.md
+  s_3f0cdbd772e3e8::t_5f7632a19a0691 1-35
+docs/cli.md
+  s_3f0cdbd772e3e8::t_829e23aa1f3002 1-44
+src/codex_pdf/extract/annotations.py
+  3f0cdbd772e3e829 1-39
+schemas/v1/codex-font.schema.json
+  3f0cdbd772e3e829 1-18
+schemas/v1/codex-warning.schema.json
+  3f0cdbd772e3e829 1-13
+schemas/v1/codex-ocg.schema.json
+  3f0cdbd772e3e829 1-15
+src/codex_pdf/__init__.py
+  3f0cdbd772e3e829 1-6
+schemas/v1/codex-box.schema.json
+  3f0cdbd772e3e829 1-14
+pyproject.toml
+  s_3f0cdbd772e3e8::t_e697bf0c5c68d2 7
+  3f0cdbd772e3e829 1-6,8-36
+schemas/v1/codex-document.schema.json
+  3f0cdbd772e3e829 1-50
+src/codex_pdf/extract/__init__.py
+  3f0cdbd772e3e829 1-5
+src/codex_pdf/extract/transparency.py
+  3f0cdbd772e3e829 1-31
+schemas/v1/codex-trap-evidence.schema.json
+  3f0cdbd772e3e829 1-25
+docs/contract.md
+  s_3f0cdbd772e3e8::t_4558ea4e7e5406 1-36
+src/codex_pdf/extract/ocg.py
+  3f0cdbd772e3e829 1-65
+docs/preflight-ingest.md
+  s_3f0cdbd772e3e8::t_89c70367746830 1-33
+src/codex_pdf/schema.py
+  3f0cdbd772e3e829 1-20
+src/codex_pdf/extract/images.py
+  3f0cdbd772e3e829 1-45
+src/codex_pdf/extract/color.py
+  3f0cdbd772e3e829 1-99
+src/codex_pdf/preflight_ingest/__init__.py
+  3f0cdbd772e3e829 1-21
+src/codex_pdf/parity.py
+  3f0cdbd772e3e829 1-298
+src/codex_pdf/models/v1.py
+  3f0cdbd772e3e829 1-285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "8f59ccd99882a34fb1c4dd0ea71a0abf05db91a1",
+  "prompts": {
+    "3f0cdbd772e3e829": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "35baf435-0446-43c6-8341-50917f7cd5d6",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>",
+      "total_additions": 3348,
+      "total_deletions": 669,
+      "accepted_lines": 2674,
+      "overriden_lines": 0
+    }
+  },
+  "sessions": {
+    "s_3f0cdbd772e3e8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "35baf435-0446-43c6-8341-50917f7cd5d6",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
