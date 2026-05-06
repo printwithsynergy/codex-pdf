@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from jsonschema import validate
 
@@ -17,13 +18,36 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _write_json(payload: Any, *, pretty: bool, output_path: str | None) -> None:
+    if pretty:
+        text = json.dumps(payload, indent=2, sort_keys=True)
+    else:
+        text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    if output_path:
+        Path(output_path).write_text(f"{text}\n", encoding="utf-8")
+    else:
+        print(text)
+
+
+def _published_schema_path() -> Path:
+    return _repo_root() / "schemas" / "v1" / "codex-document.schema.json"
+
+
+def _contract_manifest() -> dict[str, Any]:
+    return {
+        "contract_name": "codex-document",
+        "schema_version": "1.0.0",
+        "schema_path": str(_published_schema_path()),
+        "schema_id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
+        "extract_command": "codex-pdf extract <input_pdf>",
+        "validate_command": "codex-pdf validate <codex_json>",
+    }
+
+
 def cmd_extract(args: argparse.Namespace) -> int:
     doc = extract_from_path(Path(args.input_pdf))
     payload = doc.model_dump(mode="json")
-    if args.pretty:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(json.dumps(payload, separators=(",", ":")))
+    _write_json(payload, pretty=args.pretty, output_path=args.output)
     return 0
 
 
@@ -32,7 +56,12 @@ def cmd_schema(args: argparse.Namespace) -> int:
         schema = load_published_schema(_repo_root())
     else:
         schema = codex_document_schema()
-    print(json.dumps(schema, indent=2, sort_keys=True))
+    _write_json(schema, pretty=True, output_path=args.output)
+    return 0
+
+
+def cmd_contract(args: argparse.Namespace) -> int:
+    _write_json(_contract_manifest(), pretty=True, output_path=args.output)
     return 0
 
 
@@ -75,13 +104,19 @@ def build_parser() -> argparse.ArgumentParser:
     extract = sub.add_parser("extract", help="Extract a CodexDocument from a PDF.")
     extract.add_argument("input_pdf")
     extract.add_argument("--pretty", action="store_true")
+    extract.add_argument("--output", default=None, help="Write JSON to this path instead of stdout.")
     extract.set_defaults(func=cmd_extract)
 
     schema = sub.add_parser("schema", help="Print JSON Schema for CodexDocument.")
     schema.add_argument("--version", default="1")
     schema.add_argument("--name", default="codex-document")
     schema.add_argument("--published", action="store_true")
+    schema.add_argument("--output", default=None, help="Write schema JSON to this path.")
     schema.set_defaults(func=cmd_schema)
+
+    contract = sub.add_parser("contract", help="Print machine-readable codex contract manifest.")
+    contract.add_argument("--output", default=None, help="Write contract JSON to this path.")
+    contract.set_defaults(func=cmd_contract)
 
     validate_cmd = sub.add_parser("validate", help="Validate codex JSON against published schema.")
     validate_cmd.add_argument("codex_json")
