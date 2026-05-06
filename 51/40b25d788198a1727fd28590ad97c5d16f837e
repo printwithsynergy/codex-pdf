@@ -1,0 +1,21 @@
+tests/test_cli_contract.py
+  s_b6db5244fff483::t_0865c638d6eb4b 1-20
+src/codex_pdf/cli.py
+  s_b6db5244fff483::t_6d4ea4cfb05a39 8,21-46,50,59-64,107,114,117-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "5140b25d788198a1727fd28590ad97c5d16f837e",
+  "prompts": {},
+  "sessions": {
+    "s_b6db5244fff483": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c92fd016-5694-47f8-ae3a-6f1771ffb4ae",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
