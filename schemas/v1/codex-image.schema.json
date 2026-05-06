@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-image.schema.json",
+  "title": "CodexImage",
+  "type": "object",
+  "required": ["image_id", "page_num", "width_px", "height_px", "soft_mask"],
+  "properties": {
+    "image_id": { "type": "string" },
+    "page_num": { "type": "integer", "minimum": 1 },
+    "width_px": { "type": "integer", "minimum": 0 },
+    "height_px": { "type": "integer", "minimum": 0 },
+    "bits_per_component": { "type": ["integer", "null"] },
+    "color_space_id": { "type": ["string", "null"] },
+    "compression": { "type": ["string", "null"] },
+    "soft_mask": { "type": "boolean" },
+    "bbox_effective": { "anyOf": [{ "$ref": "codex-box.schema.json" }, { "type": "null" }] },
+    "effective_resolution_dpi": {
+      "type": ["object", "null"],
+      "properties": {
+        "x_dpi": { "type": "number" },
+        "y_dpi": { "type": "number" }
+      },
+      "required": ["x_dpi", "y_dpi"],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

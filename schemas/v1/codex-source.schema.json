@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-source.schema.json",
+  "title": "CodexSourceRef",
+  "type": "object",
+  "properties": {
+    "uri": { "type": ["string", "null"] },
+    "sha256": { "type": ["string", "null"] },
+    "size_bytes": { "type": ["integer", "null"], "minimum": 0 }
+  },
+  "additionalProperties": false
+}

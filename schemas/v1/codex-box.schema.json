@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-box.schema.json",
+  "title": "CodexBBox",
+  "type": "object",
+  "required": ["x0", "y0", "x1", "y1"],
+  "properties": {
+    "x0": { "type": "number" },
+    "y0": { "type": "number" },
+    "x1": { "type": "number" },
+    "y1": { "type": "number" }
+  },
+  "additionalProperties": false
+}

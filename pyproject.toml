@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codex-pdf"
+version = "0.1.1"
+description = "Authoritative, versioned PDF facts contract for Think Neverland tools."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "Think Neverland", email = "dev@thinkneverland.com" }]
+dependencies = [
+  "pydantic>=2.8",
+  "jsonschema>=4.23",
+  "PyMuPDF>=1.24",
+  "pikepdf>=9.0",
+]
+
+[project.scripts]
+codex-pdf = "codex_pdf.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_pdf"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

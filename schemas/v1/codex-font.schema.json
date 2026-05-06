@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-font.schema.json",
+  "title": "CodexFont",
+  "type": "object",
+  "required": ["font_id", "subtype", "embedded", "outline_type", "missing_glyphs_detected", "page_refs"],
+  "properties": {
+    "font_id": { "type": "string" },
+    "base_name": { "type": ["string", "null"] },
+    "subtype": { "type": "string" },
+    "encoding": { "type": ["string", "null"] },
+    "embedded": { "type": "string", "enum": ["full", "subset", "referenced", "unknown"] },
+    "outline_type": { "type": "string", "enum": ["CFF", "TrueType", "Type1", "Type3", "CID", "unknown"] },
+    "missing_glyphs_detected": { "type": "boolean" },
+    "page_refs": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+  },
+  "additionalProperties": false
+}

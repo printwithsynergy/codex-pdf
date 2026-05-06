@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-preflight-report.schema.json",
+  "title": "CodexPreflightReport",
+  "type": "object",
+  "required": ["report_id", "source_engine", "ingest_format", "issues", "ingest_warnings"],
+  "properties": {
+    "report_id": { "type": "string" },
+    "source_engine": { "type": "string", "enum": ["lintPDF", "callas", "PitStop", "Acrobat", "other"] },
+    "engine_version": { "type": ["string", "null"] },
+    "ingest_format": { "type": "string" },
+    "issues": { "type": "array", "items": { "$ref": "codex-issue.schema.json" } },
+    "ingest_warnings": { "type": "array", "items": { "$ref": "codex-warning.schema.json" } }
+  },
+  "additionalProperties": false
+}

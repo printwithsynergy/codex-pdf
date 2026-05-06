@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-transparency-tree.schema.json",
+  "title": "CodexTransparencyTree",
+  "type": "object",
+  "required": ["groups", "soft_masks", "knockout_groups", "lazy_sampler"],
+  "properties": {
+    "groups": { "type": "array", "items": { "type": "object" } },
+    "soft_masks": { "type": "array", "items": { "type": "object" } },
+    "knockout_groups": { "type": "array", "items": { "type": "object" } },
+    "lazy_sampler": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["on_demand"] },
+        "endpoint": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

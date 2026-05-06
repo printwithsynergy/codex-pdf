@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-trap-evidence.schema.json",
+  "title": "CodexTrapEvidence",
+  "type": "object",
+  "required": ["trap_network_annotations", "trap_layers", "interpretation_notes"],
+  "properties": {
+    "trapped_flag": { "type": ["string", "null"], "enum": ["True", "False", "Unknown", null] },
+    "trap_network_annotations": { "type": "array", "items": { "type": "string" } },
+    "trap_layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ocg_id": { "type": ["string", "null"] },
+          "name": { "type": ["string", "null"] },
+          "processing_step": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "interpretation_notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

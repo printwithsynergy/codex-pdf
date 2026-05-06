@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-color-space.schema.json",
+  "title": "CodexColorSpace",
+  "type": "object",
+  "required": ["id", "family", "canonical"],
+  "properties": {
+    "id": { "type": "string" },
+    "family": {
+      "type": "string",
+      "enum": [
+        "DeviceGray",
+        "DeviceRGB",
+        "DeviceCMYK",
+        "ICCBased",
+        "Separation",
+        "DeviceN",
+        "Lab",
+        "CalRGB",
+        "CalGray",
+        "Indexed",
+        "Pattern"
+      ]
+    },
+    "canonical": { "type": "object" },
+    "icc_profile_id": { "type": ["string", "null"] },
+    "alternate_space_id": { "type": ["string", "null"] },
+    "tint_transform": { "type": ["string", "null"] },
+    "spot_colorants": {
+      "type": "array",
+      "items": { "$ref": "codex-spot-colorant.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}

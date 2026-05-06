@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-form-xobject.schema.json",
+  "title": "CodexFormXObject",
+  "type": "object",
+  "required": ["object_id", "resource_refs"],
+  "properties": {
+    "object_id": { "type": "string" },
+    "parent_object_id": { "type": ["string", "null"] },
+    "resource_refs": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-page.schema.json",
+  "title": "CodexPage",
+  "type": "object",
+  "required": ["page_num", "rotation", "boxes"],
+  "properties": {
+    "page_num": { "type": "integer", "minimum": 1 },
+    "rotation": { "type": "integer" },
+    "boxes": {
+      "type": "object",
+      "required": ["media"],
+      "properties": {
+        "media": { "$ref": "codex-box.schema.json" },
+        "crop": { "anyOf": [{ "$ref": "codex-box.schema.json" }, { "type": "null" }] },
+        "bleed": { "anyOf": [{ "$ref": "codex-box.schema.json" }, { "type": "null" }] },
+        "trim": { "anyOf": [{ "$ref": "codex-box.schema.json" }, { "type": "null" }] },
+        "art": { "anyOf": [{ "$ref": "codex-box.schema.json" }, { "type": "null" }] }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "font_ids": { "type": "array", "items": { "type": "string" } },
+        "color_space_ids": { "type": "array", "items": { "type": "string" } },
+        "xobject_ids": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "inventory": { "type": "array", "items": { "$ref": "codex-page-object.schema.json" } },
+    "transparency_tree": { "$ref": "codex-transparency-tree.schema.json" },
+    "annotations": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

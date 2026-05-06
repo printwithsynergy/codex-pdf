@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-spot-colorant.schema.json",
+  "title": "CodexSpotColorant",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string" },
+    "alternate_space_id": { "type": ["string", "null"] },
+    "tint_transform": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

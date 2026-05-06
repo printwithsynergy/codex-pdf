@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0.0",
+  "codex_version": "0.1.1",
+  "document_id": "golden-reference",
+  "source": {
+    "uri": "fixture://reference",
+    "sha256": null,
+    "size_bytes": null
+  },
+  "pdf_version": "unknown",
+  "is_encrypted": false,
+  "conformance": {
+    "pdfx": null,
+    "pdfa": null,
+    "pdfua": null
+  },
+  "pages": [
+    {
+      "page_num": 1,
+      "rotation": 0,
+      "boxes": {
+        "media": {
+          "x0": 0.0,
+          "y0": 0.0,
+          "x1": 612.0,
+          "y1": 792.0
+        },
+        "crop": null,
+        "bleed": null,
+        "trim": null,
+        "art": null
+      },
+      "resources": {
+        "font_ids": [],
+        "color_space_ids": [],
+        "xobject_ids": []
+      },
+      "inventory": [],
+      "transparency_tree": {
+        "groups": [],
+        "soft_masks": [],
+        "knockout_groups": [],
+        "lazy_sampler": {
+          "mode": "on_demand",
+          "endpoint": null
+        }
+      },
+      "annotations": []
+    }
+  ],
+  "output_intents": [],
+  "icc_profiles": [],
+  "color_spaces": [],
+  "fonts": [],
+  "images": [],
+  "ocgs": [],
+  "form_xobjects": [],
+  "trap_evidence": {
+    "trapped_flag": null,
+    "trap_network_annotations": [],
+    "trap_layers": [],
+    "interpretation_notes": []
+  },
+  "annotations": [],
+  "preflight_reports": [],
+  "extraction_warnings": []
+}

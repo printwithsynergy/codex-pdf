@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-page-object.schema.json",
+  "title": "CodexPageObject",
+  "type": "object",
+  "required": ["object_id", "kind", "graphics_state", "color_usage", "ocg_membership"],
+  "properties": {
+    "object_id": { "type": "string" },
+    "kind": { "type": "string", "enum": ["text", "vector", "raster", "shading", "form_xobject"] },
+    "bbox_effective": { "anyOf": [{ "$ref": "codex-box.schema.json" }, { "type": "null" }] },
+    "clip_paths": { "type": "array", "items": { "type": "string" } },
+    "graphics_state": { "type": "object" },
+    "color_usage": { "type": "object" },
+    "blend_mode": { "type": ["string", "null"] },
+    "opacity_fill": { "type": ["number", "null"] },
+    "opacity_stroke": { "type": ["number", "null"] },
+    "ocg_membership": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

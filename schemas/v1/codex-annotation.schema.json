@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-annotation.schema.json",
+  "title": "CodexAnnotation",
+  "type": "object",
+  "required": ["annotation_id", "page_num", "has_appearance_stream"],
+  "properties": {
+    "annotation_id": { "type": "string" },
+    "subtype": { "type": ["string", "null"] },
+    "page_num": { "type": "integer", "minimum": 1 },
+    "rect": { "anyOf": [{ "$ref": "codex-box.schema.json" }, { "type": "null" }] },
+    "contents": { "type": ["string", "null"] },
+    "has_appearance_stream": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

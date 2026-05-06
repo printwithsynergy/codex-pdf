@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
+  "title": "CodexDocument",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "codex_version",
+    "document_id",
+    "source",
+    "pdf_version",
+    "is_encrypted",
+    "conformance",
+    "pages"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "codex_version": { "type": "string" },
+    "document_id": { "type": "string" },
+    "source": { "$ref": "codex-source.schema.json" },
+    "pdf_version": { "type": "string" },
+    "is_encrypted": { "type": "boolean" },
+    "trapped_flag": { "type": ["string", "null"], "enum": ["True", "False", "Unknown", null] },
+    "conformance": {
+      "type": "object",
+      "properties": {
+        "pdfx": { "type": ["string", "null"] },
+        "pdfa": { "type": ["string", "null"] },
+        "pdfua": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "pages": {
+      "type": "array",
+      "items": { "$ref": "codex-page.schema.json" }
+    },
+    "output_intents": { "type": "array", "items": { "$ref": "codex-output-intent.schema.json" } },
+    "icc_profiles": { "type": "array", "items": { "type": "object" } },
+    "color_spaces": { "type": "array", "items": { "$ref": "codex-color-space.schema.json" } },
+    "fonts": { "type": "array", "items": { "$ref": "codex-font.schema.json" } },
+    "images": { "type": "array", "items": { "$ref": "codex-image.schema.json" } },
+    "ocgs": { "type": "array", "items": { "$ref": "codex-ocg.schema.json" } },
+    "form_xobjects": { "type": "array", "items": { "$ref": "codex-form-xobject.schema.json" } },
+    "trap_evidence": { "$ref": "codex-trap-evidence.schema.json" },
+    "annotations": { "type": "array", "items": { "$ref": "codex-annotation.schema.json" } },
+    "preflight_reports": { "type": "array", "items": { "$ref": "codex-preflight-report.schema.json" } },
+    "extraction_warnings": { "type": "array", "items": { "$ref": "codex-warning.schema.json" } }
+  },
+  "additionalProperties": false
+}

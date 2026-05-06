@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-output-intent.schema.json",
+  "title": "CodexOutputIntent",
+  "type": "object",
+  "properties": {
+    "subtype": { "type": ["string", "null"] },
+    "output_condition_identifier": { "type": ["string", "null"] },
+    "profile_id": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

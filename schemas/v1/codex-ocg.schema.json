@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-ocg.schema.json",
+  "title": "CodexOCG",
+  "type": "object",
+  "required": ["ocg_id", "name", "default_visible", "intent"],
+  "properties": {
+    "ocg_id": { "type": "string" },
+    "name": { "type": "string" },
+    "default_visible": { "type": "boolean" },
+    "intent": { "type": "array", "items": { "type": "string" } },
+    "iso19593_processing_step": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}
