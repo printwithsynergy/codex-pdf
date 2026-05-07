@@ -1,0 +1,23 @@
+Procfile
+  s_9b5cc9427311dc::t_fe5880b02bd2bc 1
+Dockerfile
+  s_9b5cc9427311dc::t_781727bc5c58ed 41-47,53-54,59,62-65
+railway.toml
+  s_9b5cc9427311dc::t_2b62a548d4e63c 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "487f0d6f03a62c0abc6e96d9831f1d42f9d05ea9",
+  "prompts": {},
+  "sessions": {
+    "s_9b5cc9427311dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0dfc135d-672d-426a-9d16-83de130473b9",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
