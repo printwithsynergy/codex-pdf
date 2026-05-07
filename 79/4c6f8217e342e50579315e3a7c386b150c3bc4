@@ -1,0 +1,54 @@
+reports/audit/mislocated-closure.json
+  s_4d925a565f4237::t_b86c78b933e56c 1-44
+reports/parity/criterion4_parser_surface.json
+  s_33df83c5bacfa2::t_b5003a8db9d9c8 1-28
+schemas/v1/codex-document.schema.json
+  s_93053673d2195f::t_c6f8c27ceeabe5 1297-1359
+src/codex_pdf/extract/document.py
+  s_33df83c5bacfa2::t_008e1b3dde7097 17,42,69,92
+pyproject.toml
+  s_4d925a565f4237::t_c3275c95fb4ddc 7
+src/codex_pdf/extract/signals.py
+  s_33df83c5bacfa2::t_b275a0edb316d9 1-313
+src/codex_pdf/models/v1.py
+  s_33df83c5bacfa2::t_cda4711865cbc8 274,298
+  s_93053673d2195f::t_1c3f9e11efb409 68-76,80-83
+APPROVALS.md
+  s_4d925a565f4237::t_dbcb6748101e68 1-28
+tests/test_extract_analysis_signals.py
+  s_33df83c5bacfa2::t_574b6ddf3343d5 1-59
+schemas/v1/codex-spot-colorant.schema.json
+  s_93053673d2195f::t_6bc0fa12c3b46b 10-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "794c6f8217e342e50579315e3a7c386b150c3bc4",
+  "prompts": {},
+  "sessions": {
+    "s_33df83c5bacfa2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8efcdc0d-aa62-483d-8511-281885792553",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    },
+    "s_4d925a565f4237": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a4e4c49c-f417-4e57-8dfc-7c733b76d7c0",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    },
+    "s_93053673d2195f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c92e0149-a65e-47a1-b09d-8a2d919bbfe4",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
