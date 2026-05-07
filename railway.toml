@@ -1,0 +1,35 @@
+# Shared codex-pdf Railway service config.
+# Per-consumer sidecars live at:
+#   - lint-pdf-ui/packages/web/codex-sidecar/railway.toml
+#   - loupe-pdf-marketing/codex-sidecar/railway.toml
+# They reference this same Dockerfile so all three deployments stay
+# aligned on render behaviour and contract version.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# `startCommand` is required when the Dockerfile uses `CMD ["sh", "-c", ...]`
+# because Railway treats Dockerfile-supplied CMD instructions as advisory and
+# refuses to deploy without an explicit start command. Match the Dockerfile
+# CMD verbatim so local `docker run` and Railway runs agree.
+startCommand = "uv run uvicorn codex_pdf.api.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+numReplicas = 1
+sleepApplication = false
+
+# Required env vars (set per environment in the Railway dashboard or
+# via `railway variables`):
+#
+#   CODEX_BASIC_AUTH_ENABLED   "true" to require Basic Auth
+#   CODEX_BASIC_AUTH_USERNAME  Basic Auth username (Quincy-recorded)
+#   CODEX_BASIC_AUTH_PASSWORD  Basic Auth password (Quincy-recorded)
+#   ALLOW_EXTERNAL_FETCH       "true" to enable JSON URL ingestion
+#   FETCH_TIMEOUT_MS           Fetch timeout (default 15000)
+#   FETCH_MAX_BYTES            Hard download cap (default 52428800)
+#   CODEX_BEARER_TOKEN         Optional bearer fallback for marketing
+#   CODEX_INTERNAL_TOKEN       Optional sidecar-internal token

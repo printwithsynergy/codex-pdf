@@ -97,6 +97,92 @@ def cmd_parity(args: argparse.Namespace) -> int:
     return run_parity_from_namespace(args, _repo_root())
 
 
+def cmd_render_page(args: argparse.Namespace) -> int:
+    """Render a single page to PNG via the codex render core."""
+    from codex_pdf.render.page import render_page
+
+    pdf_bytes = Path(args.input_pdf).read_bytes()
+    on = [int(x) for x in (args.ocg_on or "").split(",") if x.strip()]
+    off = [int(x) for x in (args.ocg_off or "").split(",") if x.strip()]
+    png = render_page(
+        pdf_bytes,
+        args.page,
+        dpi=args.dpi,
+        ocg_on=on or None,
+        ocg_off=off or None,
+        simulate_overprint=args.simulate_overprint,
+    )
+    Path(args.output).write_bytes(png)
+    return 0
+
+
+def cmd_render_separations(args: argparse.Namespace) -> int:
+    """Render every separation channel for one page; writes PNGs into a directory."""
+    from codex_pdf.render.separations import render_separations
+
+    pdf_bytes = Path(args.input_pdf).read_bytes()
+    result = render_separations(pdf_bytes, args.page, dpi=args.dpi)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict[str, Any]] = []
+    for ch in result["channels"]:
+        safe = "".join(c if c.isalnum() else "_" for c in ch["name"])
+        target = out_dir / f"p{args.page}_{safe}.png"
+        target.write_bytes(ch["png"])
+        manifest.append(
+            {"name": ch["name"], "type": ch["type"], "path": str(target.relative_to(out_dir))}
+        )
+    (out_dir / "manifest.json").write_text(
+        json.dumps(
+            {"page_num": result["page_num"], "dpi": result["dpi"], "channels": manifest},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    return 0
+
+
+def cmd_render_heatmap(args: argparse.Namespace) -> int:
+    from codex_pdf.render.separations import render_heatmap
+
+    pdf_bytes = Path(args.input_pdf).read_bytes()
+    result = render_heatmap(pdf_bytes, args.page, dpi=args.dpi, tac_limit=args.tac_limit)
+    Path(args.output).write_bytes(result["png"])
+    if args.runs:
+        Path(args.runs).write_text(json.dumps(result["runs"], indent=2) + "\n")
+    return 0
+
+
+def cmd_render_layer(args: argparse.Namespace) -> int:
+    from codex_pdf.render.layer import render_layer
+
+    pdf_bytes = Path(args.input_pdf).read_bytes()
+    all_idx = [int(x) for x in args.all_layer_indices.split(",") if x.strip()]
+    png = render_layer(
+        pdf_bytes,
+        args.page,
+        layer_index=args.layer_index,
+        all_layer_indices=all_idx,
+        dpi=args.dpi,
+    )
+    Path(args.output).write_bytes(png)
+    return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start the codex HTTP API (uvicorn under the hood)."""
+    import uvicorn
+
+    uvicorn.run(
+        "codex_pdf.api.main:app",
+        host=args.host,
+        port=args.port,
+        log_level=args.log_level,
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codex-pdf")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -146,6 +232,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parity.add_argument("--fail-on-diff", action="store_true", help="Return non-zero if any diff exists.")
     parity.set_defaults(func=cmd_parity)
+
+    render = sub.add_parser("render", help="Codex render core (page/separations/heatmap/layer).")
+    render_sub = render.add_subparsers(dest="render_command", required=True)
+
+    rp = render_sub.add_parser("page", help="Render one page to PNG.")
+    rp.add_argument("input_pdf")
+    rp.add_argument("--page", type=int, default=1)
+    rp.add_argument("--dpi", type=int, default=300)
+    rp.add_argument("--ocg-on", default=None, help="Comma-separated indices to force visible.")
+    rp.add_argument("--ocg-off", default=None, help="Comma-separated indices to force hidden.")
+    rp.add_argument("--no-simulate-overprint", dest="simulate_overprint", action="store_false")
+    rp.set_defaults(simulate_overprint=True, func=cmd_render_page)
+    rp.add_argument("--output", required=True)
+
+    rs = render_sub.add_parser("separations", help="Render every separation channel for one page.")
+    rs.add_argument("input_pdf")
+    rs.add_argument("--page", type=int, default=1)
+    rs.add_argument("--dpi", type=int, default=150)
+    rs.add_argument("--output-dir", required=True)
+    rs.set_defaults(func=cmd_render_separations)
+
+    rh = render_sub.add_parser("heatmap", help="Render TAC heatmap PNG.")
+    rh.add_argument("input_pdf")
+    rh.add_argument("--page", type=int, default=1)
+    rh.add_argument("--dpi", type=int, default=150)
+    rh.add_argument("--tac-limit", type=float, default=300)
+    rh.add_argument("--output", required=True)
+    rh.add_argument("--runs", default=None, help="Optional path to write per-text-run JSON.")
+    rh.set_defaults(func=cmd_render_heatmap)
+
+    rl = render_sub.add_parser("layer", help="Render one OCG-isolated layer to RGBA PNG.")
+    rl.add_argument("input_pdf")
+    rl.add_argument("--page", type=int, default=1)
+    rl.add_argument("--dpi", type=int, default=150)
+    rl.add_argument("--layer-index", type=int, required=True)
+    rl.add_argument("--all-layer-indices", required=True, help="Comma-separated indices.")
+    rl.add_argument("--output", required=True)
+    rl.set_defaults(func=cmd_render_layer)
+
+    serve = sub.add_parser("serve", help="Start codex HTTP API.")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8080)
+    serve.add_argument("--log-level", default="info")
+    serve.set_defaults(func=cmd_serve)
 
     return parser
 

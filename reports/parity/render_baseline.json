@@ -1,0 +1,70 @@
+{
+  "baseline": {
+    "tests/fixtures/conforming/minimal.pdf": {
+      "pdf_sha256": "58e870657946ea4251c22f0640ca9df12104e5e96e0f4c28911b8c6147d1b4ac",
+      "renders": {
+        "page=1,dpi=150,simulate_overprint=true": {
+          "png_bytes": 9816,
+          "png_sha256": "44028895526ac20f894ee4f0a33731b563a690d24a014c069e0f6cc541891711"
+        },
+        "page=1,dpi=72,simulate_overprint=true": {
+          "png_bytes": 3038,
+          "png_sha256": "442fbd7d99521ec65819dfb27627be3c42270dfa27691d776d76b83db6044a11"
+        }
+      }
+    },
+    "tests/fixtures/violating/no_output_intent.pdf": {
+      "pdf_sha256": "f6aeff44e581334fb36b290ba8cb1a92f816b3b07b54700d0ced040a5eb11ef9",
+      "renders": {
+        "page=1,dpi=150,simulate_overprint=true": {
+          "png_bytes": 9816,
+          "png_sha256": "44028895526ac20f894ee4f0a33731b563a690d24a014c069e0f6cc541891711"
+        },
+        "page=1,dpi=72,simulate_overprint=true": {
+          "png_bytes": 3038,
+          "png_sha256": "442fbd7d99521ec65819dfb27627be3c42270dfa27691d776d76b83db6044a11"
+        }
+      }
+    },
+    "tests/fixtures/violating/no_trim_box.pdf": {
+      "pdf_sha256": "0dfab7cab7db644cf382f240776ccc15ee9e28d2e87889d63a696cc25c88ae12",
+      "renders": {
+        "page=1,dpi=150,simulate_overprint=true": {
+          "png_bytes": 9816,
+          "png_sha256": "44028895526ac20f894ee4f0a33731b563a690d24a014c069e0f6cc541891711"
+        },
+        "page=1,dpi=72,simulate_overprint=true": {
+          "png_bytes": 3038,
+          "png_sha256": "442fbd7d99521ec65819dfb27627be3c42270dfa27691d776d76b83db6044a11"
+        }
+      }
+    },
+    "tests/fixtures/violating/no_xmp.pdf": {
+      "pdf_sha256": "a79742cdc7c4e83ffc4722ac662832a64a2ae03291453c1a37eaa7e75ccf3f09",
+      "renders": {
+        "page=1,dpi=150,simulate_overprint=true": {
+          "png_bytes": 9816,
+          "png_sha256": "44028895526ac20f894ee4f0a33731b563a690d24a014c069e0f6cc541891711"
+        },
+        "page=1,dpi=72,simulate_overprint=true": {
+          "png_bytes": 3038,
+          "png_sha256": "442fbd7d99521ec65819dfb27627be3c42270dfa27691d776d76b83db6044a11"
+        }
+      }
+    },
+    "tests/fixtures/violating/pdf_1_4.pdf": {
+      "pdf_sha256": "06972a5497a7cf9fd0cdf85fcad1d1a6e4677c6ad367f12c16d93e6e72851c98",
+      "renders": {
+        "page=1,dpi=150,simulate_overprint=true": {
+          "png_bytes": 9816,
+          "png_sha256": "44028895526ac20f894ee4f0a33731b563a690d24a014c069e0f6cc541891711"
+        },
+        "page=1,dpi=72,simulate_overprint=true": {
+          "png_bytes": 3038,
+          "png_sha256": "442fbd7d99521ec65819dfb27627be3c42270dfa27691d776d76b83db6044a11"
+        }
+      }
+    }
+  },
+  "codex_version": "1.2.0"
+}
