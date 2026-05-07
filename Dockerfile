@@ -38,18 +38,28 @@ COPY src ./src
 COPY schemas ./schemas
 COPY tests ./tests
 
-RUN uv sync --frozen --no-dev
+# Build the venv as root so the global cache is shared, then chown
+# everything to the non-root runtime user. Without this, `uv run` at
+# container start tries to repair the editable install and fails on
+# `/opt/venv/.../bin/codex-pdf: Permission denied` because the bin
+# entries land outside the dir tree the runtime user can write.
+RUN uv sync --frozen --no-dev \
+ && chown -R codex:codex /opt/venv /app
 
 USER codex
 
 ENV PORT=8080 \
     CODEX_AUTH_MODE=none \
-    CODEX_LOCAL_FALLBACK=1
+    CODEX_LOCAL_FALLBACK=1 \
+    UV_NO_SYNC=1
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS "http://127.0.0.1:${PORT}/healthz" || exit 1
+    CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/healthz" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "uv run uvicorn codex_pdf.api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Bypass `uv run` at runtime — the venv is already prepared. Calling
+# uvicorn directly from /opt/venv/bin avoids any sync attempt against
+# the read-only image and lets the entrypoint expand `$PORT`.
+CMD ["sh", "-c", "/opt/venv/bin/uvicorn codex_pdf.api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
