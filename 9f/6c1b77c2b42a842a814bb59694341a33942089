@@ -1,0 +1,19 @@
+railway.toml
+  s_9b5cc9427311dc::t_4eab4293116bb7 13-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "9f6c1b77c2b42a842a814bb59694341a33942089",
+  "prompts": {},
+  "sessions": {
+    "s_9b5cc9427311dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0dfc135d-672d-426a-9d16-83de130473b9",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
