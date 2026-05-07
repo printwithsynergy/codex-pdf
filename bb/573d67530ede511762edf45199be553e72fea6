@@ -1,0 +1,19 @@
+docs/deploy.md
+  s_9b5cc9427311dc::t_ec0730ce8c41a2 92-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "bb573d67530ede511762edf45199be553e72fea6",
+  "prompts": {},
+  "sessions": {
+    "s_9b5cc9427311dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0dfc135d-672d-426a-9d16-83de130473b9",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
