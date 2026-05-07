@@ -10,11 +10,11 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# `startCommand` is required when the Dockerfile uses `CMD ["sh", "-c", ...]`
-# because Railway treats Dockerfile-supplied CMD instructions as advisory and
-# refuses to deploy without an explicit start command. Match the Dockerfile
-# CMD verbatim so local `docker run` and Railway runs agree.
-startCommand = "/opt/venv/bin/uvicorn codex_pdf.api.main:app --host 0.0.0.0 --port $PORT"
+# Wrap with `sh -c "..."` so the runtime expands `$PORT`. Railway's
+# startCommand is exec'd directly without a shell, which would
+# otherwise pass the literal `$PORT` to uvicorn and crash with
+# "Invalid value for '--port': '$PORT' is not a valid integer."
+startCommand = "sh -c '/opt/venv/bin/uvicorn codex_pdf.api.main:app --host 0.0.0.0 --port ${PORT:-8080}'"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
