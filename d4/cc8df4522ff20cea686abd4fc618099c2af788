@@ -1,0 +1,88 @@
+src/codex_pdf/render/separations.py
+  s_9b5cc9427311dc::t_44d330564bbdaa 1-727
+src/codex_pdf/render/content_stream.py
+  s_9b5cc9427311dc::t_c3793d3f91c99e 1-35
+src/codex_pdf/client/http_client.py
+  s_9b5cc9427311dc::t_ffd502e0179f80 1-591
+clients/ts/src/index.ts
+  s_9b5cc9427311dc::t_f4b5c6bdb72395 1-436
+clients/ts/package.json
+  s_9b5cc9427311dc::t_fa81548d204b71 1-40
+src/codex_pdf/render/_common.py
+  s_9b5cc9427311dc::t_fc8beab4ee001f 1-132
+src/codex_pdf/client/__init__.py
+  s_9b5cc9427311dc::t_c308a22f6d71cf 1-36
+src/codex_pdf/api/cache.py
+  s_9b5cc9427311dc::t_69765666c74d1a 1-99
+railway.toml
+  s_9b5cc9427311dc::t_59610eaad21dce 1-12,17,19-24
+  s_9b5cc9427311dc::t_3f5895a4d43133 13-16,18,25-35
+src/codex_pdf/render/__init__.py
+  s_9b5cc9427311dc::t_8c0e32ed107865 1-33
+src/codex_pdf/api/auth.py
+  s_9b5cc9427311dc::t_5b93f009d8f72e 3-4,7-19,24-25
+  s_9b5cc9427311dc::t_dce64c25671ae7 1-2,5-6,20-23,26-36,42-52,58-73,75-78,82-85,116-124,127-132,135-138,146-148,150
+  s_9b5cc9427311dc::t_d6197770abace4 37-41,53-57,74,79-81,86-115,125-126,133-134,139-145,149
+pyproject.toml
+  s_9b5cc9427311dc::t_0fc69e582e3adb 7
+  s_1cf4e1656d4052::t_f125b0b4632a45 18-20
+tests/test_api.py
+  s_9b5cc9427311dc::t_2f007f268b0591 63
+  s_9b5cc9427311dc::t_2f0ca51c2cb0bd 169-415
+  s_9b5cc9427311dc::t_02f4f5393ee508 1-62,64-168
+clients/ts/README.md
+  s_9b5cc9427311dc::t_071f2879ac3186 1-33
+src/codex_pdf/render/page.py
+  s_9b5cc9427311dc::t_89425da5aa46a2 1-137
+src/codex_pdf/render/layer.py
+  s_9b5cc9427311dc::t_6c00bbc8ad5416 1-284
+src/codex_pdf/cli.py
+  s_9b5cc9427311dc::t_a8c6379ffc2b38 100-185
+  s_9b5cc9427311dc::t_471b8b6681ecf9 236-279
+Dockerfile
+  s_9b5cc9427311dc::t_36f4f5e50ff585 52,55
+  s_9b5cc9427311dc::t_a7dd00f2290037 1-51,53-54
+docs/deploy.md
+  s_9b5cc9427311dc::t_40670263cbe9f8 1-97
+clients/ts/src/index.test.ts
+  s_9b5cc9427311dc::t_0a76b5b1d68514 1-86
+src/codex_pdf/api/url_ingest.py
+  s_9b5cc9427311dc::t_143c84656f317a 1-192
+src/codex_pdf/version.py
+  s_9b5cc9427311dc::t_43cacd16e0b3e8 1,3-10
+clients/ts/tsconfig.json
+  s_9b5cc9427311dc::t_8762d0aa30e71e 1-23
+Procfile
+  s_9b5cc9427311dc::t_d13c343ef7804b 1
+src/codex_pdf/api/main.py
+  s_9b5cc9427311dc::t_ed00b764da4f61 49,59
+  s_9b5cc9427311dc::t_2009f39be8ce23 1-48,50-58,60-221,228,234-305,317-319,336,351-352,356,382,401,404-406,408-411,429-757
+  s_9b5cc9427311dc::t_e9cf1ba85f8bb4 306-316,320-335,337-350,353-355,357-381,383-400,402-403,407,412-428
+  s_9b5cc9427311dc::t_d302c6cfdf7b4d 222-227,229-233
+src/codex_pdf/api/__init__.py
+  s_9b5cc9427311dc::t_967e9a39b4ea5d 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "d4cc8df4522ff20cea686abd4fc618099c2af788",
+  "prompts": {},
+  "sessions": {
+    "s_1cf4e1656d4052": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "6b6dd342-df77-4bf1-bb1c-2b72518f42db",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    },
+    "s_9b5cc9427311dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0dfc135d-672d-426a-9d16-83de130473b9",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
