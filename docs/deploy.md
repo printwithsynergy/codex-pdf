@@ -89,6 +89,40 @@ The shared codex consumed by `lint-pdf` admin / `lint-pdf-ui`
 packages/app / `codex-pdf-marketing` should run with bearer auth and
 its `CODEX_BEARER_TOKEN` rotated through the operator's secret store.
 
+## Switching between shared and per-consumer (Option B)
+
+The same image, lockfile, and `Procfile` run in either mode —
+switching is a service-vars + DNS change, not a code change.
+
+### Shared → per-consumer (lint marketing example)
+
+1. New Railway service in the lintpdf.com project pointing at the
+   `codex-pdf` repo.
+2. Set "Root Directory" to `codex-pdf` so the canonical Dockerfile
+   is the build context (or, if you keep the sidecar config in the
+   marketing repo, override it via Railway's "Build Context" field
+   — see `lint-pdf-ui/packages/web/codex-sidecar/railway.toml`).
+3. Provision env vars (`CODEX_BEARER_TOKEN`, `CODEX_INTERNAL_TOKEN`,
+   etc.) — `openssl rand -hex 24` for both.
+4. Update the marketing service:
+   ```
+   CODEX_API_BASE_URL=<new sidecar URL>
+   CODEX_API_TOKEN=<sidecar bearer>
+   ```
+5. Trigger a marketing redeploy so it picks up the new base URL.
+
+### Per-consumer → shared
+
+1. Reset the marketing service vars to the shared codex:
+   ```
+   CODEX_API_BASE_URL=https://codex-pdf-production.up.railway.app
+   CODEX_API_TOKEN=<shared production bearer>
+   ```
+2. Pause / archive the sidecar service in the Railway dashboard.
+
+Both modes preserve `/healthz` (un-auth) and `/extract` aliases so
+ops probes / curl flows from either side keep working unchanged.
+
 ## Local development without HTTP
 
 Set `CODEX_API_BASE` empty (the default) and the
