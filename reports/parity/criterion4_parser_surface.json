@@ -1,0 +1,28 @@
+{
+  "criterion": "4",
+  "pass_focus": "codex contract expansion for dieline and spot analyzers",
+  "evidence": {
+    "analysis_keys": [
+      "spot_names",
+      "layer_names",
+      "page_1"
+    ],
+    "page_1_keys": [
+      "media_box",
+      "content_ops",
+      "cs_to_spot",
+      "prop_to_ocg_name",
+      "extgstate"
+    ]
+  },
+  "validation_commands": [
+    {
+      "command": "uv run pytest -q tests/test_extract_analysis_signals.py tests/test_models.py tests/test_extract_structural.py",
+      "status": "passed"
+    },
+    {
+      "command": "uv run pytest -q tests/test_schema.py tests/test_schemas_all.py tests/test_cli_contract.py",
+      "status": "passed"
+    }
+  ]
+}

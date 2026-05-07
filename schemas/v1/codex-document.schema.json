@@ -1,50 +1,1761 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
-  "title": "CodexDocument",
-  "type": "object",
-  "required": [
-    "schema_version",
-    "codex_version",
-    "document_id",
-    "source",
-    "pdf_version",
-    "is_encrypted",
-    "conformance",
-    "pages"
-  ],
-  "properties": {
-    "schema_version": { "type": "string" },
-    "codex_version": { "type": "string" },
-    "document_id": { "type": "string" },
-    "source": { "$ref": "codex-source.schema.json" },
-    "pdf_version": { "type": "string" },
-    "is_encrypted": { "type": "boolean" },
-    "trapped_flag": { "type": ["string", "null"], "enum": ["True", "False", "Unknown", null] },
-    "conformance": {
-      "type": "object",
+  "$defs": {
+    "CodexAnnotation": {
       "properties": {
-        "pdfx": { "type": ["string", "null"] },
-        "pdfa": { "type": ["string", "null"] },
-        "pdfua": { "type": ["string", "null"] }
+        "annotation_id": {
+          "title": "Annotation Id",
+          "type": "string"
+        },
+        "contents": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contents"
+        },
+        "has_appearance_stream": {
+          "default": false,
+          "title": "Has Appearance Stream",
+          "type": "boolean"
+        },
+        "page_num": {
+          "title": "Page Num",
+          "type": "integer"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtype"
+        }
       },
-      "additionalProperties": false
+      "required": [
+        "annotation_id",
+        "page_num"
+      ],
+      "title": "CodexAnnotation",
+      "type": "object"
+    },
+    "CodexBBox": {
+      "properties": {
+        "x0": {
+          "title": "X0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
+          "type": "number"
+        },
+        "y1": {
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "title": "CodexBBox",
+      "type": "object"
+    },
+    "CodexColorSpace": {
+      "properties": {
+        "alternate_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alternate Space Id"
+        },
+        "canonical": {
+          "additionalProperties": true,
+          "title": "Canonical",
+          "type": "object"
+        },
+        "family": {
+          "enum": [
+            "DeviceGray",
+            "DeviceRGB",
+            "DeviceCMYK",
+            "ICCBased",
+            "Separation",
+            "DeviceN",
+            "Lab",
+            "CalRGB",
+            "CalGray",
+            "Indexed",
+            "Pattern"
+          ],
+          "title": "Family",
+          "type": "string"
+        },
+        "icc_profile_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icc Profile Id"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "spot_colorants": {
+          "items": {
+            "$ref": "#/$defs/CodexSpotColorant"
+          },
+          "title": "Spot Colorants",
+          "type": "array"
+        },
+        "tint_transform": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tint Transform"
+        }
+      },
+      "required": [
+        "id",
+        "family"
+      ],
+      "title": "CodexColorSpace",
+      "type": "object"
+    },
+    "CodexColorUsage": {
+      "properties": {
+        "color_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color Space Id"
+        },
+        "spot_colorants": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Spot Colorants",
+          "type": "array"
+        }
+      },
+      "title": "CodexColorUsage",
+      "type": "object"
+    },
+    "CodexConformanceClaims": {
+      "properties": {
+        "pdfa": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfa"
+        },
+        "pdfua": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfua"
+        },
+        "pdfx": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfx"
+        }
+      },
+      "title": "CodexConformanceClaims",
+      "type": "object"
+    },
+    "CodexFont": {
+      "properties": {
+        "base_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Name"
+        },
+        "embedded": {
+          "default": "unknown",
+          "enum": [
+            "full",
+            "subset",
+            "referenced",
+            "unknown"
+          ],
+          "title": "Embedded",
+          "type": "string"
+        },
+        "encoding": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Encoding"
+        },
+        "font_id": {
+          "title": "Font Id",
+          "type": "string"
+        },
+        "missing_glyphs_detected": {
+          "default": false,
+          "title": "Missing Glyphs Detected",
+          "type": "boolean"
+        },
+        "outline_type": {
+          "default": "unknown",
+          "enum": [
+            "CFF",
+            "TrueType",
+            "Type1",
+            "Type3",
+            "CID",
+            "unknown"
+          ],
+          "title": "Outline Type",
+          "type": "string"
+        },
+        "page_refs": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Page Refs",
+          "type": "array"
+        },
+        "subtype": {
+          "default": "unknown",
+          "title": "Subtype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "font_id"
+      ],
+      "title": "CodexFont",
+      "type": "object"
+    },
+    "CodexFormXObject": {
+      "properties": {
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "parent_object_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Object Id"
+        },
+        "resource_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Resource Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "object_id"
+      ],
+      "title": "CodexFormXObject",
+      "type": "object"
+    },
+    "CodexGraphicsStateSnapshot": {
+      "properties": {
+        "alpha_fill": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alpha Fill"
+        },
+        "alpha_stroke": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alpha Stroke"
+        },
+        "fill_color_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Color Space Id"
+        },
+        "overprint_fill": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overprint Fill"
+        },
+        "overprint_stroke": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overprint Stroke"
+        },
+        "stroke_color_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stroke Color Space Id"
+        }
+      },
+      "title": "CodexGraphicsStateSnapshot",
+      "type": "object"
+    },
+    "CodexICCProfile": {
+      "properties": {
+        "color_space": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color Space"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "named_match": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Named Match"
+        },
+        "pcs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pcs"
+        },
+        "profile_class": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Class"
+        },
+        "profile_id": {
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "source": {
+          "default": "Other",
+          "enum": [
+            "OutputIntent",
+            "ColorSpace",
+            "Image",
+            "Other"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "default": "unknown",
+          "enum": [
+            "v2",
+            "v4",
+            "unknown"
+          ],
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "sha256"
+      ],
+      "title": "CodexICCProfile",
+      "type": "object"
+    },
+    "CodexImage": {
+      "properties": {
+        "bbox_effective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bits_per_component": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bits Per Component"
+        },
+        "color_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color Space Id"
+        },
+        "compression": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compression"
+        },
+        "effective_resolution_dpi": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexResolution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "height_px": {
+          "title": "Height Px",
+          "type": "integer"
+        },
+        "image_id": {
+          "title": "Image Id",
+          "type": "string"
+        },
+        "page_num": {
+          "title": "Page Num",
+          "type": "integer"
+        },
+        "soft_mask": {
+          "default": false,
+          "title": "Soft Mask",
+          "type": "boolean"
+        },
+        "width_px": {
+          "title": "Width Px",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "image_id",
+        "page_num",
+        "width_px",
+        "height_px"
+      ],
+      "title": "CodexImage",
+      "type": "object"
+    },
+    "CodexInfoDict": {
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "creation_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Creation Date"
+        },
+        "creator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Creator"
+        },
+        "custom": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Custom",
+          "type": "object"
+        },
+        "mod_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mod Date"
+        },
+        "producer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "title": "CodexInfoDict",
+      "type": "object"
+    },
+    "CodexIssue": {
+      "properties": {
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "inspection_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inspection Id"
+        },
+        "issue_id": {
+          "title": "Issue Id",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "page_num": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Num"
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "advisory"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        }
+      },
+      "required": [
+        "issue_id",
+        "severity",
+        "message"
+      ],
+      "title": "CodexIssue",
+      "type": "object"
+    },
+    "CodexKnockoutGroup": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group_id"
+      ],
+      "title": "CodexKnockoutGroup",
+      "type": "object"
+    },
+    "CodexLazySamplerDescriptor": {
+      "properties": {
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "mode": {
+          "const": "on_demand",
+          "default": "on_demand",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "CodexLazySamplerDescriptor",
+      "type": "object"
+    },
+    "CodexOCG": {
+      "properties": {
+        "default_visible": {
+          "default": true,
+          "title": "Default Visible",
+          "type": "boolean"
+        },
+        "intent": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Intent",
+          "type": "array"
+        },
+        "iso19593_processing_step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Iso19593 Processing Step"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ocg_id": {
+          "title": "Ocg Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ocg_id",
+        "name"
+      ],
+      "title": "CodexOCG",
+      "type": "object"
+    },
+    "CodexOutputIntent": {
+      "properties": {
+        "output_condition_identifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Condition Identifier"
+        },
+        "profile_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Id"
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtype"
+        }
+      },
+      "title": "CodexOutputIntent",
+      "type": "object"
+    },
+    "CodexPage": {
+      "properties": {
+        "analysis": {
+          "additionalProperties": true,
+          "title": "Analysis",
+          "type": "object"
+        },
+        "annotations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Annotations",
+          "type": "array"
+        },
+        "boxes": {
+          "$ref": "#/$defs/CodexPageBoxes"
+        },
+        "inventory": {
+          "items": {
+            "$ref": "#/$defs/CodexPageObject"
+          },
+          "title": "Inventory",
+          "type": "array"
+        },
+        "page_num": {
+          "title": "Page Num",
+          "type": "integer"
+        },
+        "resources": {
+          "$ref": "#/$defs/CodexPageResourcesRef"
+        },
+        "rotation": {
+          "default": 0,
+          "title": "Rotation",
+          "type": "integer"
+        },
+        "transparency_tree": {
+          "$ref": "#/$defs/CodexTransparencyTree"
+        }
+      },
+      "required": [
+        "page_num",
+        "boxes"
+      ],
+      "title": "CodexPage",
+      "type": "object"
+    },
+    "CodexPageBoxes": {
+      "properties": {
+        "art": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bleed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "crop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "media": {
+          "$ref": "#/$defs/CodexBBox"
+        },
+        "trim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "media"
+      ],
+      "title": "CodexPageBoxes",
+      "type": "object"
+    },
+    "CodexPageObject": {
+      "properties": {
+        "bbox_effective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "blend_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blend Mode"
+        },
+        "clip_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Clip Paths",
+          "type": "array"
+        },
+        "color_usage": {
+          "$ref": "#/$defs/CodexColorUsage"
+        },
+        "graphics_state": {
+          "$ref": "#/$defs/CodexGraphicsStateSnapshot"
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "vector",
+            "raster",
+            "shading",
+            "form_xobject"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "ocg_membership": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ocg Membership",
+          "type": "array"
+        },
+        "opacity_fill": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Opacity Fill"
+        },
+        "opacity_stroke": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Opacity Stroke"
+        }
+      },
+      "required": [
+        "object_id",
+        "kind"
+      ],
+      "title": "CodexPageObject",
+      "type": "object"
+    },
+    "CodexPageResourcesRef": {
+      "properties": {
+        "color_space_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Color Space Ids",
+          "type": "array"
+        },
+        "font_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Font Ids",
+          "type": "array"
+        },
+        "xobject_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Xobject Ids",
+          "type": "array"
+        }
+      },
+      "title": "CodexPageResourcesRef",
+      "type": "object"
+    },
+    "CodexPreflightReport": {
+      "properties": {
+        "engine_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Engine Version"
+        },
+        "ingest_format": {
+          "title": "Ingest Format",
+          "type": "string"
+        },
+        "ingest_warnings": {
+          "items": {
+            "$ref": "#/$defs/CodexWarning"
+          },
+          "title": "Ingest Warnings",
+          "type": "array"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/CodexIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "report_id": {
+          "title": "Report Id",
+          "type": "string"
+        },
+        "source_engine": {
+          "enum": [
+            "lintPDF",
+            "callas",
+            "PitStop",
+            "Acrobat",
+            "other"
+          ],
+          "title": "Source Engine",
+          "type": "string"
+        }
+      },
+      "required": [
+        "report_id",
+        "source_engine",
+        "ingest_format"
+      ],
+      "title": "CodexPreflightReport",
+      "type": "object"
+    },
+    "CodexResolution": {
+      "properties": {
+        "x_dpi": {
+          "title": "X Dpi",
+          "type": "number"
+        },
+        "y_dpi": {
+          "title": "Y Dpi",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x_dpi",
+        "y_dpi"
+      ],
+      "title": "CodexResolution",
+      "type": "object"
+    },
+    "CodexSoftMask": {
+      "properties": {
+        "mask_id": {
+          "title": "Mask Id",
+          "type": "string"
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtype"
+        }
+      },
+      "required": [
+        "mask_id"
+      ],
+      "title": "CodexSoftMask",
+      "type": "object"
+    },
+    "CodexSourceRef": {
+      "properties": {
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Bytes"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
+        }
+      },
+      "title": "CodexSourceRef",
+      "type": "object"
+    },
+    "CodexSpotColorant": {
+      "properties": {
+        "alternate_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alternate Space Id"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "tint_transform": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tint Transform"
+        },
+        "lab": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                { "type": "number" },
+                { "type": "number" },
+                { "type": "number" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            { "type": "null" }
+          ],
+          "default": null,
+          "title": "Lab"
+        },
+        "cmyk": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                { "type": "number" },
+                { "type": "number" },
+                { "type": "number" },
+                { "type": "number" }
+              ],
+              "items": false,
+              "minItems": 4,
+              "maxItems": 4
+            },
+            { "type": "null" }
+          ],
+          "default": null,
+          "title": "Cmyk"
+        },
+        "rgb": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                { "type": "number" },
+                { "type": "number" },
+                { "type": "number" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            { "type": "null" }
+          ],
+          "default": null,
+          "title": "Rgb"
+        },
+        "pantone_name": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "title": "Pantone Name"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CodexSpotColorant",
+      "type": "object"
+    },
+    "CodexTransparencyGroup": {
+      "properties": {
+        "blend_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blend Mode"
+        },
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        },
+        "isolated": {
+          "default": false,
+          "title": "Isolated",
+          "type": "boolean"
+        },
+        "knockout": {
+          "default": false,
+          "title": "Knockout",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "group_id"
+      ],
+      "title": "CodexTransparencyGroup",
+      "type": "object"
+    },
+    "CodexTransparencyTree": {
+      "properties": {
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/CodexTransparencyGroup"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
+        "knockout_groups": {
+          "items": {
+            "$ref": "#/$defs/CodexKnockoutGroup"
+          },
+          "title": "Knockout Groups",
+          "type": "array"
+        },
+        "lazy_sampler": {
+          "$ref": "#/$defs/CodexLazySamplerDescriptor"
+        },
+        "soft_masks": {
+          "items": {
+            "$ref": "#/$defs/CodexSoftMask"
+          },
+          "title": "Soft Masks",
+          "type": "array"
+        }
+      },
+      "title": "CodexTransparencyTree",
+      "type": "object"
+    },
+    "CodexTrapEvidence": {
+      "properties": {
+        "interpretation_notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Interpretation Notes",
+          "type": "array"
+        },
+        "trap_layers": {
+          "items": {
+            "$ref": "#/$defs/CodexTrapLayerEvidence"
+          },
+          "title": "Trap Layers",
+          "type": "array"
+        },
+        "trap_network_annotations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Trap Network Annotations",
+          "type": "array"
+        },
+        "trapped_flag": {
+          "anyOf": [
+            {
+              "enum": [
+                "True",
+                "False",
+                "Unknown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trapped Flag"
+        }
+      },
+      "title": "CodexTrapEvidence",
+      "type": "object"
+    },
+    "CodexTrapLayerEvidence": {
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "ocg_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ocg Id"
+        },
+        "processing_step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Processing Step"
+        }
+      },
+      "title": "CodexTrapLayerEvidence",
+      "type": "object"
+    },
+    "CodexWarning": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "CodexWarning",
+      "type": "object"
+    },
+    "CodexXmpPacket": {
+      "properties": {
+        "pdfa_part": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfa Part"
+        },
+        "pdfua_part": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfua Part"
+        },
+        "pdfxid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfxid"
+        },
+        "present": {
+          "default": false,
+          "title": "Present",
+          "type": "boolean"
+        }
+      },
+      "title": "CodexXmpPacket",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "analysis": {
+      "additionalProperties": true,
+      "title": "Analysis",
+      "type": "object"
+    },
+    "annotations": {
+      "items": {
+        "$ref": "#/$defs/CodexAnnotation"
+      },
+      "title": "Annotations",
+      "type": "array"
+    },
+    "codex_version": {
+      "title": "Codex Version",
+      "type": "string"
+    },
+    "color_spaces": {
+      "items": {
+        "$ref": "#/$defs/CodexColorSpace"
+      },
+      "title": "Color Spaces",
+      "type": "array"
+    },
+    "conformance": {
+      "$ref": "#/$defs/CodexConformanceClaims"
+    },
+    "document_id": {
+      "title": "Document Id",
+      "type": "string"
+    },
+    "extraction_warnings": {
+      "items": {
+        "$ref": "#/$defs/CodexWarning"
+      },
+      "title": "Extraction Warnings",
+      "type": "array"
+    },
+    "fonts": {
+      "items": {
+        "$ref": "#/$defs/CodexFont"
+      },
+      "title": "Fonts",
+      "type": "array"
+    },
+    "form_xobjects": {
+      "items": {
+        "$ref": "#/$defs/CodexFormXObject"
+      },
+      "title": "Form Xobjects",
+      "type": "array"
+    },
+    "icc_profiles": {
+      "items": {
+        "$ref": "#/$defs/CodexICCProfile"
+      },
+      "title": "Icc Profiles",
+      "type": "array"
+    },
+    "images": {
+      "items": {
+        "$ref": "#/$defs/CodexImage"
+      },
+      "title": "Images",
+      "type": "array"
+    },
+    "info": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CodexInfoDict"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "is_encrypted": {
+      "default": false,
+      "title": "Is Encrypted",
+      "type": "boolean"
+    },
+    "ocgs": {
+      "items": {
+        "$ref": "#/$defs/CodexOCG"
+      },
+      "title": "Ocgs",
+      "type": "array"
+    },
+    "output_intents": {
+      "items": {
+        "$ref": "#/$defs/CodexOutputIntent"
+      },
+      "title": "Output Intents",
+      "type": "array"
     },
     "pages": {
-      "type": "array",
-      "items": { "$ref": "codex-page.schema.json" }
+      "items": {
+        "$ref": "#/$defs/CodexPage"
+      },
+      "title": "Pages",
+      "type": "array"
     },
-    "output_intents": { "type": "array", "items": { "$ref": "codex-output-intent.schema.json" } },
-    "icc_profiles": { "type": "array", "items": { "type": "object" } },
-    "color_spaces": { "type": "array", "items": { "$ref": "codex-color-space.schema.json" } },
-    "fonts": { "type": "array", "items": { "$ref": "codex-font.schema.json" } },
-    "images": { "type": "array", "items": { "$ref": "codex-image.schema.json" } },
-    "ocgs": { "type": "array", "items": { "$ref": "codex-ocg.schema.json" } },
-    "form_xobjects": { "type": "array", "items": { "$ref": "codex-form-xobject.schema.json" } },
-    "trap_evidence": { "$ref": "codex-trap-evidence.schema.json" },
-    "annotations": { "type": "array", "items": { "$ref": "codex-annotation.schema.json" } },
-    "preflight_reports": { "type": "array", "items": { "$ref": "codex-preflight-report.schema.json" } },
-    "extraction_warnings": { "type": "array", "items": { "$ref": "codex-warning.schema.json" } }
+    "pdf_version": {
+      "default": "unknown",
+      "title": "Pdf Version",
+      "type": "string"
+    },
+    "preflight_reports": {
+      "items": {
+        "$ref": "#/$defs/CodexPreflightReport"
+      },
+      "title": "Preflight Reports",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/CodexSourceRef"
+    },
+    "trap_evidence": {
+      "$ref": "#/$defs/CodexTrapEvidence"
+    },
+    "trapped_flag": {
+      "anyOf": [
+        {
+          "enum": [
+            "True",
+            "False",
+            "Unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trapped Flag"
+    },
+    "xmp": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CodexXmpPacket"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
   },
-  "additionalProperties": false
+  "required": [
+    "codex_version",
+    "document_id",
+    "source"
+  ],
+  "title": "CodexDocument",
+  "type": "object"
 }

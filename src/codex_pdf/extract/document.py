@@ -14,6 +14,7 @@ from codex_pdf.extract.fonts import extract_fonts_fitz
 from codex_pdf.extract.forms import extract_forms_pikepdf
 from codex_pdf.extract.images import extract_images_fitz
 from codex_pdf.extract.ocg import extract_ocgs_pikepdf
+from codex_pdf.extract.signals import extract_analysis_signals_pikepdf
 from codex_pdf.extract.structure import (
     conformance_claims_from_metadata,
     extract_structure_fitz,
@@ -38,6 +39,7 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
     pdf_version = "unknown"
     is_encrypted = False
     trapped_flag = None
+    analysis: dict[str, object] = {}
 
     try:
         import fitz
@@ -64,6 +66,7 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
     output_intents, color_spaces = extract_color_world_pikepdf(pdf_bytes)
     ocgs = extract_ocgs_pikepdf(pdf_bytes)
     form_xobjects = extract_forms_pikepdf(pdf_bytes)
+    analysis = extract_analysis_signals_pikepdf(pdf_bytes)
     trap_evidence = extract_trap_evidence(
         trapped_flag=trapped_flag,
         ocg_names=[x.name for x in ocgs],
@@ -86,6 +89,7 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
         images=images,
         ocgs=ocgs,
         form_xobjects=form_xobjects,
+        analysis=analysis,
         trap_evidence=trap_evidence,
         annotations=annotations,
         pages=pages,

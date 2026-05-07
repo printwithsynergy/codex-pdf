@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0.0",
+  "report_kind": "codex-pdf.mislocated-closure",
+  "repo": "codex-pdf",
+  "audit_date": "2026-05-07",
+  "owner": "CODEX maintainer",
+  "items": [
+    {
+      "id": "codex-spotcolorant-additive-fields",
+      "description": "loupe-pdf adapter needed per-colorant Lab/CMYK/RGB and a canonical Pantone name on `CodexSpotColorant`; the v1.0.0 schema only carried `name`, `alternate_space_id`, `tint_transform`.",
+      "originally_flagged_in": "QUESTIONABLE-DECISIONS.md 2026-05-07 codex spot-colorant additive Lab/CMYK fields",
+      "status": "closed-in-place",
+      "rationale": "Added `lab`, `cmyk`, `rgb`, `pantone_name` as optional fields on the existing v1.0.0 model and updated the bundled + split JSON schemas. Defaults `None`; codex-pdf 22/22 tests pass; lint-pdf 3786/3786 tests pass.",
+      "evidence": ["src/codex_pdf/models/v1.py", "schemas/v1/codex-document.schema.json", "schemas/v1/codex-spot-colorant.schema.json", "QUESTIONABLE-DECISIONS.md 2026-05-07 codex spot-colorant additive Lab/CMYK fields"]
+    },
+    {
+      "id": "codex-pikepdf-extractor-spotcolor-population",
+      "description": "Python extractor (`src/codex_pdf/extract/color.py`) does not yet populate the new Lab/CMYK/RGB/pantone_name fields from PDF Separation tint transforms.",
+      "originally_flagged_in": "QUESTIONABLE-DECISIONS.md 2026-05-07 codex spot-colorant additive Lab/CMYK fields (Risk section)",
+      "status": "deferred-via-future-moves",
+      "rationale": "Schema is additive-ready, but extractor logic to read PDF tint transforms requires a coordinated codex extractor pass. Loupe resolver already falls through to Pantone DB lookup by name, which covers the common case.",
+      "evidence": ["/Users/macadmin/synergy-agents/future-moves.md 2026-05-07 Criterion-closure newly deferred moves (`plot` candidate)"]
+    },
+    {
+      "id": "codex-analysis-side-channel",
+      "description": "Lint-pdf migrated analyzers needed structured signals (spot/layer names, page-1 operator stream, resource maps) without re-parsing the PDF.",
+      "originally_flagged_in": "QUESTIONABLE-DECISIONS.md 2026-05-07 codex analysis side-channel for dieline parity",
+      "status": "closed-in-place",
+      "rationale": "Expanded `CodexDocument.analysis` with additive parser-surface signals; lint-pdf rewires through `lintpdf.codex_adapter`. Verified by lint-pdf parity-corpus harness diff_count=0.",
+      "evidence": ["lint-pdf reports/parity/criterion4_corpus_report.diff.json", "QUESTIONABLE-DECISIONS.md 2026-05-07 codex analysis side-channel for dieline parity"]
+    },
+    {
+      "id": "codex-golden-master-suite",
+      "description": "Cutover criterion 2 required `codex-pdf` golden-master regression suite green.",
+      "originally_flagged_in": "ACCEPTANCE-AUDIT.md row 2",
+      "status": "closed-in-place",
+      "rationale": "`uv run pytest tests/test_golden_corpus.py tests/test_parity.py` → 9 passed; `uv run codex-pdf parity ... --profile {summary,inventory,deep} --fail-on-diff` → diff_count: 0 each.",
+      "evidence": ["ACCEPTANCE-AUDIT.md row 2"]
+    }
+  ],
+  "deferred_to_future_moves": [
+    "plot — extractor to populate per-colorant Lab/CMYK from PDF Separation tint transforms"
+  ]
+}

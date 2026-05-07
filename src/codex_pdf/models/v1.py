@@ -65,9 +65,22 @@ class CodexOutputIntent(BaseModel):
 
 
 class CodexSpotColorant(BaseModel):
+    """A spot colorant declared on a Separation / DeviceN colour space.
+
+    Optional ``lab`` / ``cmyk`` / ``rgb`` / ``pantone_name`` carry per
+    colorant colour intent so downstream renderers (e.g. the loupe-pdf
+    viewer) can resolve intent-accurate swatches without falling back
+    to hash-of-name pseudo-random hues. Extractors are free to leave
+    them ``None`` — additive fields, no breaking change.
+    """
+
     name: str
     alternate_space_id: str | None = None
     tint_transform: str | None = None
+    lab: tuple[float, float, float] | None = None
+    cmyk: tuple[float, float, float, float] | None = None
+    rgb: tuple[float, float, float] | None = None
+    pantone_name: str | None = None
 
 
 class CodexColorSpace(BaseModel):
@@ -258,6 +271,7 @@ class CodexPage(BaseModel):
     inventory: list[CodexPageObject] = Field(default_factory=list)
     transparency_tree: CodexTransparencyTree = Field(default_factory=CodexTransparencyTree)
     annotations: list[str] = Field(default_factory=list)
+    analysis: dict[str, Any] = Field(default_factory=dict)
 
 
 class CodexDocument(BaseModel):
@@ -281,5 +295,6 @@ class CodexDocument(BaseModel):
     form_xobjects: list[CodexFormXObject] = Field(default_factory=list)
     trap_evidence: CodexTrapEvidence = Field(default_factory=CodexTrapEvidence)
     annotations: list[CodexAnnotation] = Field(default_factory=list)
+    analysis: dict[str, Any] = Field(default_factory=dict)
     preflight_reports: list[CodexPreflightReport] = Field(default_factory=list)
     extraction_warnings: list[CodexWarning] = Field(default_factory=list)

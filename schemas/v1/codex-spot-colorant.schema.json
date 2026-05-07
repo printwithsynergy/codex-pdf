@@ -7,7 +7,63 @@
   "properties": {
     "name": { "type": "string" },
     "alternate_space_id": { "type": ["string", "null"] },
-    "tint_transform": { "type": ["string", "null"] }
+    "tint_transform": { "type": ["string", "null"] },
+    "lab": {
+      "anyOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        },
+        { "type": "null" }
+      ],
+      "default": null
+    },
+    "cmyk": {
+      "anyOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        { "type": "null" }
+      ],
+      "default": null
+    },
+    "rgb": {
+      "anyOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        },
+        { "type": "null" }
+      ],
+      "default": null
+    },
+    "pantone_name": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "default": null
+    }
   },
   "additionalProperties": false
 }
