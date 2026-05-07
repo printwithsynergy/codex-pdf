@@ -1,0 +1,304 @@
+{
+  "profile": "summary",
+  "fixtures_root": "/Users/macadmin/Code/printwithsynergy/codex-pdf/tests/fixtures",
+  "fixtures_total": 5,
+  "baseline_command": null,
+  "cases": [
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/codex-pdf/tests/fixtures/conforming/minimal.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "pages": [
+          {
+            "page_num": 1,
+            "rotate": 0,
+            "user_unit": 1.0,
+            "media_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "crop_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "bleed_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "trim_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "art_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "width_pts": 612.0,
+            "height_pts": 792.0
+          }
+        ],
+        "info_dict": {
+          "title": "PDFX4 Fixture",
+          "author": null,
+          "subject": null,
+          "creator": null,
+          "producer": null,
+          "creation_date": null,
+          "mod_date": null,
+          "custom": {}
+        }
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/codex-pdf/tests/fixtures/violating/no_output_intent.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "pages": [
+          {
+            "page_num": 1,
+            "rotate": 0,
+            "user_unit": 1.0,
+            "media_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "crop_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "bleed_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "trim_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "art_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "width_pts": 612.0,
+            "height_pts": 792.0
+          }
+        ],
+        "info_dict": {
+          "title": "PDFX4 Fixture",
+          "author": null,
+          "subject": null,
+          "creator": null,
+          "producer": null,
+          "creation_date": null,
+          "mod_date": null,
+          "custom": {}
+        }
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/codex-pdf/tests/fixtures/violating/no_trim_box.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "pages": [
+          {
+            "page_num": 1,
+            "rotate": 0,
+            "user_unit": 1.0,
+            "media_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "crop_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "bleed_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "trim_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "art_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "width_pts": 612.0,
+            "height_pts": 792.0
+          }
+        ],
+        "info_dict": {
+          "title": "PDFX4 Fixture",
+          "author": null,
+          "subject": null,
+          "creator": null,
+          "producer": null,
+          "creation_date": null,
+          "mod_date": null,
+          "custom": {}
+        }
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/codex-pdf/tests/fixtures/violating/no_xmp.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "pages": [
+          {
+            "page_num": 1,
+            "rotate": 0,
+            "user_unit": 1.0,
+            "media_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "crop_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "bleed_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "trim_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "art_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "width_pts": 612.0,
+            "height_pts": 792.0
+          }
+        ],
+        "info_dict": {
+          "title": "PDFX4 Fixture",
+          "author": null,
+          "subject": null,
+          "creator": null,
+          "producer": null,
+          "creation_date": null,
+          "mod_date": null,
+          "custom": {}
+        }
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/codex-pdf/tests/fixtures/violating/pdf_1_4.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.4",
+        "page_count": 1,
+        "is_encrypted": false,
+        "pages": [
+          {
+            "page_num": 1,
+            "rotate": 0,
+            "user_unit": 1.0,
+            "media_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "crop_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "bleed_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "trim_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "art_box": [
+              0.0,
+              0.0,
+              612.0,
+              792.0
+            ],
+            "width_pts": 612.0,
+            "height_pts": 792.0
+          }
+        ],
+        "info_dict": {
+          "title": "PDFX4 Fixture",
+          "author": null,
+          "subject": null,
+          "creator": null,
+          "producer": null,
+          "creation_date": null,
+          "mod_date": null,
+          "custom": {}
+        }
+      }
+    }
+  ],
+  "diff_count": 0
+}

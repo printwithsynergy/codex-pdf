@@ -1,0 +1,144 @@
+{
+  "profile": "inventory",
+  "fixtures_root": "/Users/macadmin/Code/printwithsynergy/lint-pdf/tests/fixtures/pdfx4",
+  "fixtures_total": 5,
+  "baseline_command": null,
+  "cases": [
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/lint-pdf/tests/fixtures/pdfx4/conforming/minimal.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "inventory": {
+          "fonts": 0,
+          "images": 0,
+          "annotations": 0,
+          "color_spaces": 0,
+          "icc_profiles": 0,
+          "ocgs": 0,
+          "form_xobjects": 0
+        },
+        "page_inventory": [
+          {
+            "page_num": 1,
+            "objects": 0,
+            "images": 0,
+            "annotations": 0
+          }
+        ]
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/lint-pdf/tests/fixtures/pdfx4/violating/no_output_intent.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "inventory": {
+          "fonts": 0,
+          "images": 0,
+          "annotations": 0,
+          "color_spaces": 0,
+          "icc_profiles": 0,
+          "ocgs": 0,
+          "form_xobjects": 0
+        },
+        "page_inventory": [
+          {
+            "page_num": 1,
+            "objects": 0,
+            "images": 0,
+            "annotations": 0
+          }
+        ]
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/lint-pdf/tests/fixtures/pdfx4/violating/no_trim_box.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "inventory": {
+          "fonts": 0,
+          "images": 0,
+          "annotations": 0,
+          "color_spaces": 0,
+          "icc_profiles": 0,
+          "ocgs": 0,
+          "form_xobjects": 0
+        },
+        "page_inventory": [
+          {
+            "page_num": 1,
+            "objects": 0,
+            "images": 0,
+            "annotations": 0
+          }
+        ]
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/lint-pdf/tests/fixtures/pdfx4/violating/no_xmp.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "is_encrypted": false,
+        "inventory": {
+          "fonts": 0,
+          "images": 0,
+          "annotations": 0,
+          "color_spaces": 0,
+          "icc_profiles": 0,
+          "ocgs": 0,
+          "form_xobjects": 0
+        },
+        "page_inventory": [
+          {
+            "page_num": 1,
+            "objects": 0,
+            "images": 0,
+            "annotations": 0
+          }
+        ]
+      }
+    },
+    {
+      "pdf": "/Users/macadmin/Code/printwithsynergy/lint-pdf/tests/fixtures/pdfx4/violating/pdf_1_4.pdf",
+      "status": "no_baseline",
+      "diffs": [],
+      "codex_projection": {
+        "pdf_version": "1.4",
+        "page_count": 1,
+        "is_encrypted": false,
+        "inventory": {
+          "fonts": 0,
+          "images": 0,
+          "annotations": 0,
+          "color_spaces": 0,
+          "icc_profiles": 0,
+          "ocgs": 0,
+          "form_xobjects": 0
+        },
+        "page_inventory": [
+          {
+            "page_num": 1,
+            "objects": 0,
+            "images": 0,
+            "annotations": 0
+          }
+        ]
+      }
+    }
+  ],
+  "diff_count": 0
+}
