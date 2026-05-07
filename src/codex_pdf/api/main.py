@@ -167,6 +167,23 @@ class WalkContentStreamRequest(BaseModel):
     page: int = Field(default=1, ge=1)
 
 
+class Type4Request(BaseModel):
+    """JSON body for ``POST /v1/walk/type4``.
+
+    Mirrors the in-process API of :func:`codex_pdf.eval.ps_type4.evaluate`.
+    """
+
+    program: str = Field(..., min_length=1, max_length=16384)
+    inputs: list[float] = Field(default_factory=list, max_length=64)
+
+
+class Type4Response(BaseModel):
+    """Response shape — ``result`` is None when codex couldn't verify."""
+
+    result: list[float] | None
+    fast_path: bool
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
@@ -261,6 +278,7 @@ async def contract() -> ContractResponse:
             "POST /v1/sample/color",
             "POST /v1/sample/density",
             "POST /v1/walk/content-stream",
+            "POST /v1/walk/type4",
             "GET /v1/healthz",
             "GET /v1/version",
             "GET /v1/contract",
@@ -725,6 +743,32 @@ async def sample_density_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"sample_density failed: {exc}",
+        ) from exc
+
+
+@app.post("/v1/walk/type4", dependencies=[Depends(authenticate)])
+async def walk_type4_endpoint(body: Type4Request) -> Type4Response:
+    """Evaluate a PDF Type-4 PostScript function via codex.
+
+    Codex owns the PostScript byte-level evaluation surface; this
+    endpoint exists so lint-pdf (and any other consumer) can avoid
+    shelling out to ``gs -dNODISPLAY`` directly. Fast-path constants
+    are returned synchronously without a subprocess.
+    """
+    started = time.perf_counter()
+    try:
+        from codex_pdf.eval.ps_type4 import _fast_path_constants, evaluate
+
+        fast = _fast_path_constants(body.program)
+        result = evaluate(body.program, inputs=list(body.inputs))
+        _record("walk_type4", 200, time.perf_counter() - started)
+        return Type4Response(result=result, fast_path=fast is not None)
+    except Exception as exc:
+        logger.exception("walk_type4 failed")
+        _record("walk_type4", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"walk_type4 failed: {exc}",
         ) from exc
 
 

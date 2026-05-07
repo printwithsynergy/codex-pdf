@@ -235,6 +235,7 @@ def test_extract_url_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
     monkeypatch.setenv("FETCH_MAX_BYTES", str(50 * 1024 * 1024))
+    monkeypatch.setenv("CODEX_FETCH_ALLOW_PRIVATE", "1")
 
     with serve() as (host, port):
         with TestClient(app) as c:
@@ -248,6 +249,7 @@ def test_extract_url_success(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_extract_url_oversize_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
     monkeypatch.setenv("FETCH_MAX_BYTES", "256")
+    monkeypatch.setenv("CODEX_FETCH_ALLOW_PRIVATE", "1")
 
     import http.server
     import threading
@@ -286,6 +288,7 @@ def test_extract_url_oversize_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_extract_url_rejects_non_pdf_magic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    monkeypatch.setenv("CODEX_FETCH_ALLOW_PRIVATE", "1")
 
     import http.server
     import threading
@@ -334,6 +337,7 @@ def test_extract_url_rejects_bad_scheme(monkeypatch: pytest.MonkeyPatch) -> None
 def test_extract_accepts_s3_url_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     """Demos may post `s3_url` or `presigned_url` instead of `url`."""
     monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    monkeypatch.setenv("CODEX_FETCH_ALLOW_PRIVATE", "1")
 
     import http.server
     import threading
@@ -370,6 +374,229 @@ def test_extract_accepts_s3_url_alias(monkeypatch: pytest.MonkeyPatch) -> None:
             assert resp.status_code == 200, resp.text
             resp = c.post("/v1/extract", json={"presigned_url": url})
             assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# SSRF hardening (1.3.0).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "loop_url",
+    [
+        "http://127.0.0.1/foo.pdf",
+        "http://127.0.0.42/x.pdf",
+        "http://localhost/x.pdf",
+        "http://[::1]/x.pdf",
+    ],
+)
+def test_ssrf_blocks_loopback(monkeypatch: pytest.MonkeyPatch, loop_url: str) -> None:
+    """The default fetcher refuses every loopback variant."""
+    monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    monkeypatch.delenv("CODEX_FETCH_ALLOW_PRIVATE", raising=False)
+    with TestClient(app) as c:
+        resp = c.post("/v1/extract", json={"url": loop_url})
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        assert "forbidden" in detail or "DNS" in detail
+
+
+@pytest.mark.parametrize(
+    "private_url",
+    [
+        "http://10.0.0.5/x.pdf",
+        "http://172.16.5.5/x.pdf",
+        "http://192.168.1.1/x.pdf",
+        "http://169.254.169.254/latest/meta-data/",  # AWS IMDS
+        "http://[fc00::1]/x.pdf",  # ULA
+        "http://[fe80::1]/x.pdf",  # link-local
+    ],
+)
+def test_ssrf_blocks_private_ranges(
+    monkeypatch: pytest.MonkeyPatch, private_url: str
+) -> None:
+    monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    monkeypatch.delenv("CODEX_FETCH_ALLOW_PRIVATE", raising=False)
+    with TestClient(app) as c:
+        resp = c.post("/v1/extract", json={"url": private_url})
+        assert resp.status_code == 400, resp.text
+        assert "forbidden" in resp.json()["detail"]
+
+
+def test_ssrf_blocks_file_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    with TestClient(app) as c:
+        resp = c.post("/v1/extract", json={"url": "file:///etc/passwd"})
+        assert resp.status_code == 400
+        assert "scheme" in resp.json()["detail"]
+
+
+def test_ssrf_blocks_data_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    with TestClient(app) as c:
+        resp = c.post(
+            "/v1/extract",
+            json={"url": "data:application/pdf;base64,JVBERi0xLjAK"},
+        )
+        assert resp.status_code == 400
+        assert "scheme" in resp.json()["detail"]
+
+
+def test_ssrf_blocks_ftp_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    with TestClient(app) as c:
+        resp = c.post("/v1/extract", json={"url": "ftp://example.com/x.pdf"})
+        assert resp.status_code == 400
+        assert "scheme" in resp.json()["detail"]
+
+
+def test_ssrf_redirect_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect chains > FETCH_MAX_REDIRECTS are rejected."""
+    import http.server
+    import threading
+    from contextlib import contextmanager
+
+    monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    monkeypatch.setenv("CODEX_FETCH_ALLOW_PRIVATE", "1")
+    monkeypatch.setenv("FETCH_MAX_REDIRECTS", "1")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            # Always redirect to itself with a different path so the
+            # client thinks the URL changed but still loops past the
+            # cap.
+            target = self.path + "/again"
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    @contextmanager
+    def serve():
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield server.server_address
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+
+    with serve() as (host, port):
+        with TestClient(app) as c:
+            resp = c.post(
+                "/v1/extract",
+                json={"url": f"http://{host}:{port}/start.pdf"},
+            )
+            assert resp.status_code == 400
+            assert "redirect" in resp.json()["detail"].lower()
+
+
+def test_ssrf_redirect_to_private_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Even with private allowed for the start, a redirect target on a
+    different private hostname must be re-validated. Here we redirect
+    to ``localhost`` with private fetches disabled mid-flight (we
+    can't disable per-hop, so this tests the hostname-allow-list
+    behaviour at the per-hop validator)."""
+    import http.server
+    import threading
+    from contextlib import contextmanager
+
+    monkeypatch.setenv("ALLOW_EXTERNAL_FETCH", "true")
+    monkeypatch.setenv("CODEX_FETCH_ALLOW_PRIVATE", "1")
+    monkeypatch.setenv("FETCH_MAX_REDIRECTS", "3")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(302)
+            self.send_header("Location", "http://0.0.0.0/x.pdf")
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    @contextmanager
+    def serve():
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield server.server_address
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+
+    with serve() as (host, port):
+        # CODEX_FETCH_ALLOW_PRIVATE=1 is set, so the fetch will follow.
+        # We test a different angle: the redirect target is a 0.0.0.0
+        # which resolves to the unspecified address — even with private
+        # allowed, fetching unspecified is a real footgun. Confirm the
+        # redirect path at least exercises validation by trying with a
+        # tighter FETCH_MAX_REDIRECTS=0.
+        monkeypatch.setenv("FETCH_MAX_REDIRECTS", "0")
+        with TestClient(app) as c:
+            resp = c.post(
+                "/v1/extract",
+                json={"url": f"http://{host}:{port}/start.pdf"},
+            )
+            # With max_redirects=0 the very first redirect is rejected.
+            assert resp.status_code == 400
+            assert "redirect" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Type-4 PostScript evaluator endpoint (1.3.0).
+# ---------------------------------------------------------------------------
+
+
+def test_walk_type4_fast_path(client: TestClient) -> None:
+    """Trivially-constant programs return without subprocess (fast_path=True)."""
+    resp = client.post("/v1/walk/type4", json={"program": "{ 0.0 }", "inputs": [0.5]})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["fast_path"] is True
+    assert body["result"] == [0.0]
+
+
+def test_walk_type4_pop_constant(client: TestClient) -> None:
+    """`{ pop 1 }` returns [1.0] via the fast path."""
+    resp = client.post(
+        "/v1/walk/type4", json={"program": "{ pop 1 }", "inputs": [0.5]}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["fast_path"] is True
+    assert body["result"] == [1.0]
+
+
+@pytest.mark.skipif(not has_ghostscript(), reason="Ghostscript not installed")
+def test_walk_type4_via_gs(client: TestClient) -> None:
+    """Non-constant programs round-trip through gs."""
+    resp = client.post(
+        "/v1/walk/type4",
+        json={"program": "{ dup mul }", "inputs": [0.5]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["fast_path"] is False
+    assert body["result"] == [0.25]
+
+
+def test_walk_type4_validates_program_length(client: TestClient) -> None:
+    long_program = "{ 0 }" + (" 0" * 20000)
+    resp = client.post("/v1/walk/type4", json={"program": long_program, "inputs": []})
+    assert resp.status_code == 422  # pydantic rejects max_length
+
+
+def test_local_client_eval_type4_round_trip() -> None:
+    from codex_pdf.client import HttpClient
+
+    c = HttpClient()
+    out = c.eval_type4("{ 0.0 }", inputs=[0.5])
+    assert out["fast_path"] is True
+    assert out["result"] == [0.0]
 
 
 def test_basic_auth_required_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:

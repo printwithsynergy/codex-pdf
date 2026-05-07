@@ -167,15 +167,21 @@ export class HttpClient {
     path: string,
     body: BodyInit,
     accept = "application/json",
+    contentType?: string,
   ): Promise<Response> {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
+        const headers: Record<string, string> = this.headers({ Accept: accept });
+        if (contentType) headers["Content-Type"] = contentType;
+        // For FormData, let fetch set Content-Type itself so the
+        // multipart boundary is correct; we only override for JSON
+        // and other explicit body types.
         const res = await this.fetchImpl(this.baseUrl + path, {
           method: "POST",
-          headers: this.headers({ Accept: accept }),
+          headers,
           body,
           signal: controller.signal,
         });
@@ -432,5 +438,22 @@ export class HttpClient {
     const fd = this.buildForm(pdf, { page: opts.page ?? 1 });
     const res = await this.post("/v1/walk/content-stream", fd);
     return (await res.json()) as { page_num: number; signals: Record<string, unknown> };
+  }
+
+  /**
+   * Evaluate a PDF Type-4 PostScript function via codex.
+   *
+   * Returns `{result, fast_path}`. `result` is `null` when codex
+   * could not verify (Ghostscript missing, timeout, parse error).
+   * `fast_path: true` indicates the program was constant and was
+   * resolved without a subprocess (sub-millisecond).
+   */
+  async evalType4(
+    program: string,
+    inputs: number[] = [],
+  ): Promise<{ result: number[] | null; fast_path: boolean }> {
+    const body = JSON.stringify({ program, inputs });
+    const res = await this.post("/v1/walk/type4", body, "application/json", "application/json");
+    return (await res.json()) as { result: number[] | null; fast_path: boolean };
   }
 }

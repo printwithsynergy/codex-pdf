@@ -1,10 +1,15 @@
 """Package version.
 
-Bumped with the additive HTTP API + render service surface
-(``codex_pdf.api`` + ``codex_pdf.render`` + ``codex_pdf.client``).
-The CodexDocument JSON contract is unchanged on disk; the schema
-version stays at ``1.0.0``. SemVer minor for additive surface.
+1.3.0 adds:
+- SSRF hardening on the URL-ingest path (literal-IP connect, DNS
+  rebinding defense, redirect cap with per-hop revalidation, private
+  / link-local / loopback allow-list).
+- ``POST /v1/walk/type4`` endpoint and ``codex_pdf.eval.ps_type4``
+  module so PDF Type-4 PostScript byte-level evaluation lives in
+  codex. lint-pdf consumes it via the client.
+
+Schema is still v1.0.0 — every change is additive.
 """
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 __version__ = VERSION

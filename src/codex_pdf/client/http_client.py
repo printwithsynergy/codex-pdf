@@ -569,6 +569,36 @@ class HttpClient:
             limit_exceeded=bool(payload["limit_exceeded"]),
         )
 
+    def eval_type4(
+        self,
+        program: str,
+        inputs: list[float] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate a PDF Type-4 PostScript function via codex.
+
+        Returns ``{"result": [...] | None, "fast_path": bool}``. When
+        the program is a trivially-constant tint transform we return
+        without contacting the server (matches Python in-process
+        fast-path so lint-pdf parity stays byte-equal).
+        """
+        inputs = list(inputs or [])
+        self._require_http_or_local()
+        if not self.is_http:
+            from codex_pdf.eval.ps_type4 import _fast_path_constants, evaluate
+
+            fast = _fast_path_constants(program)
+            result = evaluate(program, inputs=inputs)
+            return {"result": result, "fast_path": fast is not None}
+
+        body = json.dumps({"program": program, "inputs": inputs}).encode("utf-8")
+        _status, response_body, _headers = self._post(
+            "/v1/walk/type4",
+            body=body,
+            content_type="application/json",
+            accept="application/json",
+        )
+        return json.loads(response_body)
+
     def walk_content_stream(
         self,
         pdf: bytes | BinaryIO | str | os.PathLike[str],
