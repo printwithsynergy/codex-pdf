@@ -1,0 +1,39 @@
+pyproject.toml
+  s_6e4d42fd38b763::t_3676404312aa9a 7
+src/codex_pdf/extract/summary.py
+  s_6e4d42fd38b763::t_becffb07146586 108-109,124-125,131-137,146-147,158-159,164-169,203-206,251,253-259,271-288,290-313
+  s_6e4d42fd38b763::t_14bd7d3169749d 6,162-163,180-202,207-250,252,260-270,289,314
+  s_6e4d42fd38b763::t_f802a8f1944cb6 175
+src/codex_pdf/extract/signals.py
+  s_6e4d42fd38b763::t_d7233ab24bd645 21-24,30
+tests/test_summary_dieline.py
+  s_6e4d42fd38b763::t_1144f81f170f6e 2,16
+  s_6e4d42fd38b763::t_fb89c7308ee39e 23,54,75-80
+  s_6e4d42fd38b763::t_46bd9fd3f2ce54 19-22,43-44,48-53,72-74
+  s_6e4d42fd38b763::t_500490e678e82a 1,3-15,17-18,24-42,45-47,55-71
+schemas/v1/codex-document.schema.json
+  s_6e4d42fd38b763::t_b0f5acd12eadf9 1548-1554
+  s_6e4d42fd38b763::t_5875a0b2d271a2 1471-1472,1500-1524
+src/codex_pdf/version.py
+  s_6e4d42fd38b763::t_eea9a9ce708601 41
+src/codex_pdf/models/v1.py
+  s_6e4d42fd38b763::t_3341de32483a20 331
+  s_6e4d42fd38b763::t_755a43a4042029 353
+  s_6e4d42fd38b763::t_2b6159b60a1abc 334-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "d7498aeec7e29536503676e9cf0aade58758e8c4",
+  "prompts": {},
+  "sessions": {
+    "s_6e4d42fd38b763": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7eb5473d-50d2-4208-a046-f760cf93bf2c",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
