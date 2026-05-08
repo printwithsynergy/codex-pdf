@@ -1,0 +1,54 @@
+{
+  "allowed_save_sites": [
+    {
+      "function": "apply_ocg_overrides",
+      "module": "codex_pdf.render._common"
+    }
+  ],
+  "banned_ghostscript_devices": [
+    "pdfwrite",
+    "pdfimage8",
+    "pdfimage24",
+    "pdfimage32"
+  ],
+  "banned_writer_modules": [
+    "pypdf",
+    "pdfrw",
+    "reportlab",
+    "fpdf",
+    "fpdf2",
+    "borb",
+    "pdfkit"
+  ],
+  "files": [],
+  "parser_read_allowlist": [
+    "codex_pdf.api.main",
+    "codex_pdf.api.url_ingest",
+    "codex_pdf.cli",
+    "codex_pdf.eval.ps_type4",
+    "codex_pdf.extract",
+    "codex_pdf.extract.annotations",
+    "codex_pdf.extract.color",
+    "codex_pdf.extract.common",
+    "codex_pdf.extract.content_inventory",
+    "codex_pdf.extract.document",
+    "codex_pdf.extract.fonts",
+    "codex_pdf.extract.forms",
+    "codex_pdf.extract.images",
+    "codex_pdf.extract.ocg",
+    "codex_pdf.extract.signals",
+    "codex_pdf.extract.structure",
+    "codex_pdf.extract.transparency",
+    "codex_pdf.extract.trapping",
+    "codex_pdf.parity",
+    "codex_pdf.preflight_ingest.adapters",
+    "codex_pdf.render._common",
+    "codex_pdf.render.content_stream",
+    "codex_pdf.render.layer",
+    "codex_pdf.render.page",
+    "codex_pdf.render.separations"
+  ],
+  "report_kind": "codex-pdf.producer-surface-audit",
+  "schema_version": "1.0.0",
+  "status": "PASS"
+}

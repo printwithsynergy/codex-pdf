@@ -47,7 +47,7 @@ COPY tests ./tests
 # CODEX_REDIS_URL to a Railway Redis service uses the shared cache,
 # AND a deploy that deletes the redis service still boots cleanly
 # (codex falls back to in-memory; see codex_pdf.api.cache.make_cache).
-RUN uv sync --frozen --no-dev --extra redis \
+RUN uv sync --frozen --no-dev --extra redis --extra geom \
  && chown -R codex:codex /opt/venv /app
 
 USER codex

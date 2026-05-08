@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { CodexClientError, HttpClient } from "./index.js";
+import {
+  CodexClientError,
+  HttpClient,
+  alternatePantoneKey,
+  hashHueRgb,
+  labD50ToSrgb,
+  normalizePantoneName,
+} from "./index.js";
 
 describe("HttpClient", () => {
   it("requires baseUrl from options or env", () => {
@@ -63,6 +70,69 @@ describe("HttpClient", () => {
     });
     await expect(client.extract(new Uint8Array())).rejects.toBeInstanceOf(CodexClientError);
     expect(calls).toBe(1);
+  });
+
+  it("normalises Pantone names and alternates", () => {
+    expect(normalizePantoneName("Pantone 485 c")).toBe("PANTONE 485 C");
+    expect(normalizePantoneName("PMS 485 C")).toBe("PANTONE 485 C");
+    expect(alternatePantoneKey("PANTONE 485 C")).toBe("PANTONE 485C");
+    expect(alternatePantoneKey("PANTONE 485C")).toBe("PANTONE 485 C");
+  });
+
+  it("converts Lab D50 white to clamped sRGB white", () => {
+    expect(labD50ToSrgb([100, 0, 0])).toEqual([255, 255, 255]);
+  });
+
+  it("hash-hue is stable across calls", () => {
+    expect(hashHueRgb("custom-spot")).toEqual(hashHueRgb("custom-spot"));
+  });
+
+  it("calls the codex color resolve endpoint", async () => {
+    let captured: string | undefined;
+    const fakeFetch: typeof fetch = async (_url, init) => {
+      captured = init?.body as string | undefined;
+      return new Response(
+        JSON.stringify({
+          schema_version: "1.0.0",
+          rgb: [200, 30, 30],
+          source: "pantone",
+          lab: [50, 70, 30],
+          cmyk: null,
+          pantone_name: "PANTONE 485 C",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const result = await client.resolveSpotColor({ name: "PANTONE 485 C" });
+    expect(result.source).toBe("pantone");
+    expect(result.pantone_name).toBe("PANTONE 485 C");
+    expect(captured).toBe(JSON.stringify({ name: "PANTONE 485 C" }));
+  });
+
+  it("calls the codex tile endpoint", async () => {
+    const fakeFetch: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          schema_version: "1.0.0",
+          rows: 2,
+          cols: 2,
+          cells: [[0, 0, 80, 80]],
+          used: [0, 0, 80, 80],
+          waste: [0, 0, 200, 200],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const result = await client.geomTile({
+      sheet: { x0: 0, y0: 0, x1: 200, y1: 200 },
+      cellWidth: 80,
+      cellHeight: 80,
+      gutterX: 20,
+      gutterY: 20,
+    });
+    expect(result.rows).toBe(2);
+    expect(result.cells.length).toBeGreaterThan(0);
   });
 
   it("parses heatmap header runs", async () => {

@@ -15,6 +15,16 @@
  * @public
  */
 
+export {
+  alternatePantoneKey,
+  cmykToSrgbNaive,
+  hashHueRgb,
+  labD50ToSrgb,
+  normalizePantoneName,
+  srgbDecode,
+} from "./color.js";
+export type { CmykQuad as ColorCmykQuad, LabTriplet as ColorLabTriplet, RgbTriplet as ColorRgbTriplet } from "./color.js";
+
 export interface CodexClientOptions {
   /** Base URL of the codex API, e.g. `https://codex.example.com`. */
   baseUrl?: string;
@@ -97,6 +107,145 @@ export interface RenderPageOptions {
   ocgOn?: number[];
   ocgOff?: number[];
   simulateOverprint?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Color authority types — mirror codex_pdf.color (Python) byte-for-byte.
+// ---------------------------------------------------------------------------
+
+export type LabTriplet = [number, number, number];
+export type CmykQuad = [number, number, number, number];
+export type RgbTriplet = [number, number, number];
+
+export type SpotSwatchSource = "host" | "codex" | "pantone" | "curated" | "hash";
+
+export interface SpotInkOverride {
+  rgb?: RgbTriplet;
+  lab?: LabTriplet;
+  cmyk?: CmykQuad;
+  pantone_name?: string;
+}
+
+export interface CodexSpotIntent {
+  rgb?: RgbTriplet;
+  lab?: LabTriplet;
+  cmyk?: CmykQuad;
+  pantone_name?: string;
+}
+
+export interface SpotSwatchResolution {
+  schema_version: string;
+  rgb: RgbTriplet;
+  source: SpotSwatchSource;
+  lab?: LabTriplet;
+  cmyk?: CmykQuad;
+  pantone_name?: string;
+}
+
+export interface ResolveSpotInput {
+  name: string;
+  hostOverride?: SpotInkOverride;
+  codex?: CodexSpotIntent;
+  extraPantoneOverrides?: Record<string, Record<string, unknown>>;
+}
+
+export interface MatchPantoneInput {
+  lab?: LabTriplet;
+  cmyk?: CmykQuad;
+  rgb?: RgbTriplet;
+  libraries?: string[];
+}
+
+export interface MatchPantoneResult {
+  schema_version: string;
+  pantone_name: string;
+  library: string | null;
+  delta_e: number;
+  lab: LabTriplet;
+  cmyk: CmykQuad | null;
+  rgb: RgbTriplet;
+}
+
+export interface InkbookManifest {
+  source: string;
+  license: string;
+  last_updated: string;
+  available_libraries: string[];
+  included_libraries: string[];
+  included_count: number;
+  total_count: number;
+}
+
+export interface InkbookPantoneEntry {
+  name: string;
+  library: string | null;
+  lab?: LabTriplet;
+  cmyk_bridge?: CmykQuad;
+  lab_source?: string | null;
+  cmyk_source?: string | null;
+}
+
+export interface InkbookCuratedEntry {
+  rgb: RgbTriplet;
+  tokens: string[];
+}
+
+export interface Inkbook {
+  schema_version: string;
+  manifest: InkbookManifest;
+  pantone: InkbookPantoneEntry[];
+  curated: InkbookCuratedEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Geometry primitives — mirror codex_pdf.geom (Python). Pure data; no
+// PDF-emit producer code in TS.
+// ---------------------------------------------------------------------------
+
+export interface GeomBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface GeomMarksZone {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+}
+
+export interface GeomTileInput {
+  sheet: GeomBox;
+  cellWidth: number;
+  cellHeight: number;
+  gutterX?: number;
+  gutterY?: number;
+  marksZone?: GeomMarksZone;
+  origin?: "bottom-left" | "top-left";
+}
+
+export interface GeomTileResult {
+  schema_version: string;
+  rows: number;
+  cols: number;
+  cells: [number, number, number, number][];
+  used: [number, number, number, number];
+  waste: [number, number, number, number];
+}
+
+export type Polygon = [number, number][];
+export type GeomPath = Polygon[];
+
+export interface GeomBooleanInput {
+  subjects: GeomPath[];
+  clips?: GeomPath[];
+}
+
+export interface GeomBooleanResult {
+  schema_version: string;
+  rings: Polygon[];
 }
 
 function envVar(name: string): string | undefined {
@@ -455,5 +604,107 @@ export class HttpClient {
     const body = JSON.stringify({ program, inputs });
     const res = await this.post("/v1/walk/type4", body, "application/json", "application/json");
     return (await res.json()) as { result: number[] | null; fast_path: boolean };
+  }
+
+  // ----------------------- color (1.4.0+) -----------------------
+
+  /**
+   * Resolve a spot ink to a display swatch + provenance.
+   *
+   * Mirrors :func:`codex_pdf.color.resolve_spot_swatch_color` —
+   * host → codex → pantone → curated → hash precedence ladder.
+   */
+  async resolveSpotColor(input: ResolveSpotInput): Promise<SpotSwatchResolution> {
+    const body = JSON.stringify({
+      name: input.name,
+      host_override: input.hostOverride,
+      codex: input.codex,
+      extra_pantone_overrides: input.extraPantoneOverrides,
+    });
+    const res = await this.post("/v1/color/resolve", body, "application/json", "application/json");
+    return (await res.json()) as SpotSwatchResolution;
+  }
+
+  /**
+   * Find the nearest Pantone reference to a Lab/RGB/CMYK measurement.
+   *
+   * The codex server uses ΔE2000 to rank candidates against the
+   * requested library filter (defaults to Formula Guide Coated +
+   * Uncoated; pass `libraries: ["*"]` for the full catalogue).
+   */
+  async matchPantone(input: MatchPantoneInput): Promise<MatchPantoneResult> {
+    const body = JSON.stringify({
+      lab: input.lab,
+      cmyk: input.cmyk,
+      rgb: input.rgb,
+      libraries: input.libraries,
+    });
+    const res = await this.post(
+      "/v1/color/match-pantone",
+      body,
+      "application/json",
+      "application/json",
+    );
+    return (await res.json()) as MatchPantoneResult;
+  }
+
+  /**
+   * Fetch the bundled inkbook (curated + Pantone catalogue).
+   */
+  async getInkbook(libraries?: string[]): Promise<Inkbook> {
+    const qs =
+      libraries && libraries.length > 0
+        ? `?libraries=${encodeURIComponent(libraries.join(","))}`
+        : "";
+    const res = await this.get(`/v1/color/inkbook${qs}`);
+    return (await res.json()) as Inkbook;
+  }
+
+  // ----------------------- geom (1.4.0+) ------------------------
+
+  /**
+   * Compute an imposition tile-grid layout (read-only / pure data).
+   */
+  async geomTile(input: GeomTileInput): Promise<GeomTileResult> {
+    const body = JSON.stringify({
+      sheet: input.sheet,
+      cell_width: input.cellWidth,
+      cell_height: input.cellHeight,
+      gutter_x: input.gutterX ?? 0,
+      gutter_y: input.gutterY ?? 0,
+      marks_zone: {
+        top: input.marksZone?.top ?? 0,
+        right: input.marksZone?.right ?? 0,
+        bottom: input.marksZone?.bottom ?? 0,
+        left: input.marksZone?.left ?? 0,
+      },
+      origin: input.origin ?? "bottom-left",
+    });
+    const res = await this.post("/v1/geom/tile", body, "application/json", "application/json");
+    return (await res.json()) as GeomTileResult;
+  }
+
+  async geomIntersect(input: GeomBooleanInput): Promise<GeomBooleanResult> {
+    return this.geomBoolean("intersect", input);
+  }
+
+  async geomUnion(input: GeomBooleanInput): Promise<GeomBooleanResult> {
+    return this.geomBoolean("union", input);
+  }
+
+  async geomDifference(input: GeomBooleanInput): Promise<GeomBooleanResult> {
+    return this.geomBoolean("difference", input);
+  }
+
+  private async geomBoolean(
+    op: "intersect" | "union" | "difference",
+    input: GeomBooleanInput,
+  ): Promise<GeomBooleanResult> {
+    const body = JSON.stringify({
+      subjects: input.subjects,
+      clips: input.clips,
+    });
+    const res = await this.post(`/v1/geom/${op}`, body, "application/json", "application/json");
+    return (await res.json()) as GeomBooleanResult;
   }
 }

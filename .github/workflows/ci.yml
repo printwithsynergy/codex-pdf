@@ -13,10 +13,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install
+      - name: Install codex-pdf with geom + redis extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest
+          pip install -e ".[redis,geom]" pytest pytest-asyncio httpx
+      - name: Producer-surface audit (codex stays read-only)
+        run: python scripts/produce_surface_audit.py --json reports/audit/produce_surface.json
       - name: Test
         run: pytest
       - name: Parity Gate (Deep Profile)

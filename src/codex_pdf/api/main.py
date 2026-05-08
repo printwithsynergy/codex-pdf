@@ -57,7 +57,29 @@ from pydantic import BaseModel, Field
 from codex_pdf.api.auth import authenticate
 from codex_pdf.api.cache import cache_key, make_cache
 from codex_pdf.api.url_ingest import fetch_pdf_from_url
+from codex_pdf.color import (
+    COLOR_SCHEMA_VERSION,
+    CodexSpotIntent,
+    SpotInkOverride,
+    delta_e_2000,
+    load_inkbook,
+    load_pantone_reference,
+    match_nearest_pantone,
+    resolve_spot_swatch_color,
+)
+from codex_pdf.color.color_math import lab_d50_to_srgb, srgb_decode
 from codex_pdf.extract import extract_from_path
+from codex_pdf.geom import (
+    GEOM_SCHEMA_VERSION,
+    Box as GeomBox,
+    MarksZone,
+    Path as GeomPath,
+    TileGrid,
+    polygon_difference,
+    polygon_intersect,
+    polygon_union,
+    tile_grid,
+)
 from codex_pdf.render._common import OCGError, get_page_count, get_page_media_box
 from codex_pdf.render.content_stream import walk_content_stream
 from codex_pdf.render.layer import render_layer
@@ -201,6 +223,123 @@ class ContractResponse(BaseModel):
     package_version: str
     schema_id: str
     endpoints: list[str]
+    section_schema_versions: dict[str, str] = Field(default_factory=dict)
+
+
+# Color request/response models. Each field is optional; the resolver
+# picks the strongest signal it has (host > codex > pantone > curated
+# > hash). All numeric ranges are validated at the Pydantic boundary
+# so the resolver itself never receives malformed Lab/CMYK/RGB.
+LabValue = list[float]
+CmykValue = list[float]
+RgbValue = list[int]
+
+
+class ColorOverride(BaseModel):
+    rgb: RgbValue | None = None
+    lab: LabValue | None = None
+    cmyk: CmykValue | None = None
+    pantone_name: str | None = None
+
+
+class ColorResolveRequest(BaseModel):
+    """Body for ``POST /v1/color/resolve``.
+
+    ``name`` is the spot ink's canonical name (e.g. ``"PANTONE 485 C"``,
+    ``"Cut"``, ``"Varnish"``). ``host_override`` and ``codex`` carry
+    optional intent signals.
+    """
+
+    name: str = Field(..., min_length=1, max_length=256)
+    host_override: ColorOverride | None = None
+    codex: ColorOverride | None = None
+    extra_pantone_overrides: dict[str, dict[str, object]] | None = None
+
+
+class ColorResolveResponse(BaseModel):
+    schema_version: str
+    rgb: RgbValue
+    source: str
+    lab: LabValue | None = None
+    cmyk: CmykValue | None = None
+    pantone_name: str | None = None
+
+
+class ColorMatchPantoneRequest(BaseModel):
+    """Body for ``POST /v1/color/match-pantone``.
+
+    Provide a Lab triple, a CMYK quad, or an RGB triple. The endpoint
+    converts to Lab as needed before searching the catalogue. Library
+    filter mirrors :func:`codex_pdf.color.iter_pantone_entries` —
+    ``["*"]`` for the full 23k-entry catalogue, ``None`` (default) for
+    Formula Guide Coated + Uncoated.
+    """
+
+    lab: LabValue | None = None
+    cmyk: CmykValue | None = None
+    rgb: RgbValue | None = None
+    libraries: list[str] | None = None
+
+
+class ColorMatchPantoneResponse(BaseModel):
+    schema_version: str
+    pantone_name: str
+    library: str | None
+    delta_e: float
+    lab: LabValue
+    cmyk: CmykValue | None = None
+    rgb: RgbValue
+
+
+class GeomBoxModel(BaseModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class GeomMarksZoneModel(BaseModel):
+    top: float = 0.0
+    right: float = 0.0
+    bottom: float = 0.0
+    left: float = 0.0
+
+
+class GeomTileRequest(BaseModel):
+    sheet: GeomBoxModel
+    cell_width: float = Field(..., gt=0)
+    cell_height: float = Field(..., gt=0)
+    gutter_x: float = Field(default=0.0, ge=0)
+    gutter_y: float = Field(default=0.0, ge=0)
+    marks_zone: GeomMarksZoneModel = GeomMarksZoneModel()
+    origin: str = Field(default="bottom-left", pattern="^(bottom-left|top-left)$")
+
+
+class GeomTileResponse(BaseModel):
+    schema_version: str
+    rows: int
+    cols: int
+    cells: list[list[float]]
+    used: list[float]
+    waste: list[float]
+
+
+class GeomBooleanRequest(BaseModel):
+    """Body for ``POST /v1/geom/{intersect,union,difference}``.
+
+    ``subjects`` and ``clips`` are lists of paths; each path is a list
+    of polygon rings; each ring is a list of ``[x, y]`` points. The
+    server uses pyclipr (Clipper2) for non-rectangular paths and
+    pure-Python rectangle math otherwise.
+    """
+
+    subjects: list[list[list[list[float]]]]
+    clips: list[list[list[list[float]]]] | None = None
+
+
+class GeomBooleanResponse(BaseModel):
+    schema_version: str
+    rings: list[list[list[float]]]
 
 
 # ---------------------------------------------------------------------------
@@ -285,12 +424,23 @@ async def contract() -> ContractResponse:
             "POST /v1/sample/density",
             "POST /v1/walk/content-stream",
             "POST /v1/walk/type4",
+            "POST /v1/color/resolve",
+            "POST /v1/color/match-pantone",
+            "GET /v1/color/inkbook",
+            "POST /v1/geom/tile",
+            "POST /v1/geom/intersect",
+            "POST /v1/geom/union",
+            "POST /v1/geom/difference",
             "GET /v1/healthz",
             "GET /v1/version",
             "GET /v1/contract",
             "GET /v1/schema/{name}",
             "GET /metrics",
         ],
+        section_schema_versions={
+            "color": COLOR_SCHEMA_VERSION,
+            "geom": GEOM_SCHEMA_VERSION,
+        },
     )
 
 
@@ -804,4 +954,456 @@ async def walk_content_stream_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"walk_content_stream failed: {exc}",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Color authority. Codex owns the canonical Pantone reference + spot
+# resolver; lint and loupe both consume this surface (lint in-process,
+# loupe via HTTP) so we never have two forks of the colour-math
+# implementation drifting out of sync.
+# ---------------------------------------------------------------------------
+
+
+def _coerce_lab(value: list[float] | None) -> tuple[float, float, float] | None:
+    if value is None:
+        return None
+    if len(value) != 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"lab must have 3 components, got {len(value)}",
+        )
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def _coerce_cmyk(value: list[float] | None) -> tuple[float, float, float, float] | None:
+    if value is None:
+        return None
+    if len(value) != 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"cmyk must have 4 components, got {len(value)}",
+        )
+    return (float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+
+
+def _coerce_rgb(value: list[int] | None) -> tuple[int, int, int] | None:
+    if value is None:
+        return None
+    if len(value) != 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"rgb must have 3 components, got {len(value)}",
+        )
+    return (int(value[0]), int(value[1]), int(value[2]))
+
+
+def _resolve_request_to_args(body: ColorResolveRequest) -> dict[str, object]:
+    host = body.host_override
+    codex_intent = body.codex
+    return {
+        "host_override": SpotInkOverride(
+            rgb=_coerce_rgb(host.rgb) if host else None,
+            lab=_coerce_lab(host.lab) if host else None,
+            cmyk=_coerce_cmyk(host.cmyk) if host else None,
+            pantone_name=host.pantone_name if host else None,
+        ) if host is not None else None,
+        "codex_intent": CodexSpotIntent(
+            rgb=_coerce_rgb(codex_intent.rgb) if codex_intent else None,
+            lab=_coerce_lab(codex_intent.lab) if codex_intent else None,
+            cmyk=_coerce_cmyk(codex_intent.cmyk) if codex_intent else None,
+            pantone_name=codex_intent.pantone_name if codex_intent else None,
+        ) if codex_intent is not None else None,
+        "extra_pantone_overrides": body.extra_pantone_overrides,
+    }
+
+
+@app.post(
+    "/v1/color/resolve",
+    response_model=ColorResolveResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def color_resolve_endpoint(body: ColorResolveRequest) -> ColorResolveResponse:
+    started = time.perf_counter()
+    try:
+        args = _resolve_request_to_args(body)
+        result = resolve_spot_swatch_color(
+            body.name,
+            host_override=args["host_override"],  # type: ignore[arg-type]
+            codex_intent=args["codex_intent"],  # type: ignore[arg-type]
+            extra_pantone_overrides=args["extra_pantone_overrides"],  # type: ignore[arg-type]
+        )
+        _record("color_resolve", 200, time.perf_counter() - started)
+        return ColorResolveResponse(
+            schema_version=COLOR_SCHEMA_VERSION,
+            rgb=list(result.rgb),
+            source=result.source,
+            lab=list(result.lab) if result.lab is not None else None,
+            cmyk=list(result.cmyk) if result.cmyk is not None else None,
+            pantone_name=result.pantone_name,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("color_resolve failed")
+        _record("color_resolve", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"color_resolve failed: {exc}",
+        ) from exc
+
+
+def _measurement_to_lab(body: ColorMatchPantoneRequest) -> tuple[float, float, float]:
+    lab = _coerce_lab(body.lab)
+    if lab is not None:
+        return lab
+    cmyk = _coerce_cmyk(body.cmyk)
+    if cmyk is not None:
+        rgb = lab_d50_to_srgb(_cmyk_to_lab_via_srgb(cmyk))
+        return _srgb_to_lab(rgb)
+    rgb = _coerce_rgb(body.rgb)
+    if rgb is not None:
+        return _srgb_to_lab(rgb)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="match-pantone requires one of {lab, cmyk, rgb}",
+    )
+
+
+def _srgb_to_lab(rgb: tuple[int, int, int]) -> tuple[float, float, float]:
+    """Convert an 8-bit sRGB triplet to Lab D50 via XYZ.
+
+    Used only inside ``/v1/color/match-pantone`` so a request that
+    arrives as RGB or CMYK can still find a Pantone neighbour. The
+    conversion mirrors :func:`codex_pdf.color.color_math.lab_d50_to_srgb`'s
+    matrices in reverse so round-trips are stable.
+    """
+    from codex_pdf.color.color_math import (
+        D50_TO_D65,
+        D50_WHITE,
+        XYZ_D65_FROM_LINEAR_SRGB,
+    )
+
+    r_lin = srgb_decode(rgb[0] / 255.0)
+    g_lin = srgb_decode(rgb[1] / 255.0)
+    b_lin = srgb_decode(rgb[2] / 255.0)
+    x65 = (
+        XYZ_D65_FROM_LINEAR_SRGB[0][0] * r_lin
+        + XYZ_D65_FROM_LINEAR_SRGB[0][1] * g_lin
+        + XYZ_D65_FROM_LINEAR_SRGB[0][2] * b_lin
+    )
+    y65 = (
+        XYZ_D65_FROM_LINEAR_SRGB[1][0] * r_lin
+        + XYZ_D65_FROM_LINEAR_SRGB[1][1] * g_lin
+        + XYZ_D65_FROM_LINEAR_SRGB[1][2] * b_lin
+    )
+    z65 = (
+        XYZ_D65_FROM_LINEAR_SRGB[2][0] * r_lin
+        + XYZ_D65_FROM_LINEAR_SRGB[2][1] * g_lin
+        + XYZ_D65_FROM_LINEAR_SRGB[2][2] * b_lin
+    )
+    # Inverse of D50→D65 to recover D50 XYZ.
+    inv = _invert_3x3(D50_TO_D65)
+    x50 = inv[0][0] * x65 + inv[0][1] * y65 + inv[0][2] * z65
+    y50 = inv[1][0] * x65 + inv[1][1] * y65 + inv[1][2] * z65
+    z50 = inv[2][0] * x65 + inv[2][1] * y65 + inv[2][2] * z65
+    fx = _lab_f(x50 / D50_WHITE[0])
+    fy = _lab_f(y50 / D50_WHITE[1])
+    fz = _lab_f(z50 / D50_WHITE[2])
+    L = 116.0 * fy - 16.0
+    a = 500.0 * (fx - fy)
+    b = 200.0 * (fy - fz)
+    return (L, a, b)
+
+
+def _lab_f(t: float) -> float:
+    eps = 216.0 / 24389.0
+    kappa = 24389.0 / 27.0
+    if t > eps:
+        return t ** (1.0 / 3.0)
+    return (kappa * t + 16.0) / 116.0
+
+
+def _invert_3x3(
+    m: tuple[tuple[float, float, float], ...]
+) -> tuple[tuple[float, float, float], ...]:
+    a, b, c = m[0]
+    d, e, f = m[1]
+    g, h, i = m[2]
+    det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    if abs(det) < 1e-15:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="chromatic-adaptation matrix is singular",
+        )
+    inv_det = 1.0 / det
+    return (
+        ((e * i - f * h) * inv_det, (c * h - b * i) * inv_det, (b * f - c * e) * inv_det),
+        ((f * g - d * i) * inv_det, (a * i - c * g) * inv_det, (c * d - a * f) * inv_det),
+        ((d * h - e * g) * inv_det, (b * g - a * h) * inv_det, (a * e - b * d) * inv_det),
+    )
+
+
+def _cmyk_to_lab_via_srgb(
+    cmyk: tuple[float, float, float, float],
+) -> tuple[float, float, float]:
+    """Naïve CMYK→Lab via sRGB. Approximate; matches resolver maths."""
+    from codex_pdf.color.color_math import cmyk_to_srgb_naive
+
+    rgb = cmyk_to_srgb_naive(cmyk)
+    return _srgb_to_lab(rgb)
+
+
+@app.post(
+    "/v1/color/match-pantone",
+    response_model=ColorMatchPantoneResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def color_match_pantone_endpoint(
+    body: ColorMatchPantoneRequest,
+) -> ColorMatchPantoneResponse:
+    started = time.perf_counter()
+    try:
+        lab = _measurement_to_lab(body)
+        ref = load_pantone_reference()
+        nearest = match_nearest_pantone(lab, reference=ref, libraries=body.libraries)
+        if nearest is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="no Pantone entries matched the requested library filter",
+            )
+        entry, de = nearest
+        _record("color_match_pantone", 200, time.perf_counter() - started)
+        return ColorMatchPantoneResponse(
+            schema_version=COLOR_SCHEMA_VERSION,
+            pantone_name=entry.name,
+            library=entry.library,
+            delta_e=de,
+            lab=list(entry.lab) if entry.lab is not None else list(lab),
+            cmyk=list(entry.cmyk_bridge) if entry.cmyk_bridge is not None else None,
+            rgb=list(lab_d50_to_srgb(entry.lab)) if entry.lab is not None else [0, 0, 0],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("color_match_pantone failed")
+        _record("color_match_pantone", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"color_match_pantone failed: {exc}",
+        ) from exc
+
+
+@app.get("/v1/color/inkbook")
+async def color_inkbook_endpoint(
+    libraries: str | None = None,
+    _: object = Depends(authenticate),
+) -> JSONResponse:
+    started = time.perf_counter()
+    try:
+        libs = (
+            [s.strip() for s in libraries.split(",") if s.strip()]
+            if libraries is not None
+            else None
+        )
+        payload = load_inkbook(libraries=libs)
+        _record("color_inkbook", 200, time.perf_counter() - started)
+        return JSONResponse(payload)
+    except Exception as exc:
+        logger.exception("color_inkbook failed")
+        _record("color_inkbook", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"color_inkbook failed: {exc}",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Geometry primitives. Pure-data — no PDF emit. Useful for imposition
+# previews, layer-bbox math, and trap-zone planning before any
+# producer service exists.
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/v1/geom/tile",
+    response_model=GeomTileResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def geom_tile_endpoint(body: GeomTileRequest) -> GeomTileResponse:
+    started = time.perf_counter()
+    try:
+        sheet_box = GeomBox(
+            body.sheet.x0, body.sheet.y0, body.sheet.x1, body.sheet.y1
+        )
+        if sheet_box.empty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sheet is empty",
+            )
+        marks = MarksZone(
+            top=body.marks_zone.top,
+            right=body.marks_zone.right,
+            bottom=body.marks_zone.bottom,
+            left=body.marks_zone.left,
+        )
+        result = tile_grid(
+            TileGrid(
+                sheet=sheet_box,
+                cell_width=body.cell_width,
+                cell_height=body.cell_height,
+                gutter_x=body.gutter_x,
+                gutter_y=body.gutter_y,
+                marks_zone=marks,
+                origin=body.origin,
+            )
+        )
+        _record("geom_tile", 200, time.perf_counter() - started)
+        return GeomTileResponse(
+            schema_version=GEOM_SCHEMA_VERSION,
+            rows=result.rows,
+            cols=result.cols,
+            cells=[cell.to_list() for cell in result.cells],
+            used=result.used.to_list(),
+            waste=result.waste.to_list(),
+        )
+    except ValueError as exc:
+        _record("geom_tile", 400, time.perf_counter() - started)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("geom_tile failed")
+        _record("geom_tile", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"geom_tile failed: {exc}",
+        ) from exc
+
+
+def _paths_from_payload(
+    payload: list[list[list[list[float]]]] | None,
+) -> list[GeomPath]:
+    if not payload:
+        return []
+    out: list[GeomPath] = []
+    for raw_path in payload:
+        out.append(GeomPath.from_json(raw_path))
+    return out
+
+
+def _run_boolean(op: str, body: GeomBooleanRequest) -> GeomPath:
+    subjects = _paths_from_payload(body.subjects)
+    clips = _paths_from_payload(body.clips)
+    if not subjects:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="at least one subject path is required",
+        )
+    if op == "intersect":
+        if not clips:
+            return polygon_intersect(*subjects)
+        result = subjects[0]
+        for other in list(subjects[1:]) + clips:
+            result = polygon_intersect(result, other)
+        return result
+    if op == "union":
+        return polygon_union(*subjects, *clips)
+    if op == "difference":
+        if not clips:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="difference requires at least one clip path",
+            )
+        result = subjects[0]
+        for clip in clips:
+            result = polygon_difference(result, clip)
+        return result
+    raise HTTPException(  # pragma: no cover
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"unknown geom op: {op}",
+    )
+
+
+@app.post(
+    "/v1/geom/intersect",
+    response_model=GeomBooleanResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def geom_intersect_endpoint(body: GeomBooleanRequest) -> GeomBooleanResponse:
+    started = time.perf_counter()
+    try:
+        result = _run_boolean("intersect", body)
+        _record("geom_intersect", 200, time.perf_counter() - started)
+        return GeomBooleanResponse(
+            schema_version=GEOM_SCHEMA_VERSION,
+            rings=[[[p[0], p[1]] for p in ring] for ring in result.rings],
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        _record("geom_intersect", 501, time.perf_counter() - started)
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("geom_intersect failed")
+        _record("geom_intersect", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"geom_intersect failed: {exc}",
+        ) from exc
+
+
+@app.post(
+    "/v1/geom/union",
+    response_model=GeomBooleanResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def geom_union_endpoint(body: GeomBooleanRequest) -> GeomBooleanResponse:
+    started = time.perf_counter()
+    try:
+        result = _run_boolean("union", body)
+        _record("geom_union", 200, time.perf_counter() - started)
+        return GeomBooleanResponse(
+            schema_version=GEOM_SCHEMA_VERSION,
+            rings=[[[p[0], p[1]] for p in ring] for ring in result.rings],
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        _record("geom_union", 501, time.perf_counter() - started)
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("geom_union failed")
+        _record("geom_union", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"geom_union failed: {exc}",
+        ) from exc
+
+
+@app.post(
+    "/v1/geom/difference",
+    response_model=GeomBooleanResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def geom_difference_endpoint(body: GeomBooleanRequest) -> GeomBooleanResponse:
+    started = time.perf_counter()
+    try:
+        result = _run_boolean("difference", body)
+        _record("geom_difference", 200, time.perf_counter() - started)
+        return GeomBooleanResponse(
+            schema_version=GEOM_SCHEMA_VERSION,
+            rings=[[[p[0], p[1]] for p in ring] for ring in result.rings],
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        _record("geom_difference", 501, time.perf_counter() - started)
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("geom_difference failed")
+        _record("geom_difference", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"geom_difference failed: {exc}",
         ) from exc
