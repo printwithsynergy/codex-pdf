@@ -1,0 +1,41 @@
+clients/ts/package.json
+  s_8d898e9cb8f286::t_62c07072efeb76 3
+docs/operations/codex-change-ripple.md
+  s_6e4d42fd38b763::t_9eecf15e46abad 65-75,106-108
+pyproject.toml
+  s_8d898e9cb8f286::t_17c94e8c862242 7
+clients/ts/src/index.test.ts
+  s_6e4d42fd38b763::t_67fe38bdee4b3c 37-82
+tests/test_client_routing.py
+  s_6e4d42fd38b763::t_10d91a63de7065 1-102
+tests/conftest.py
+  s_6e4d42fd38b763::t_eba69e08bec192 30-36
+src/codex_pdf/client/http_client.py
+  s_6e4d42fd38b763::t_4909ca2d1cfdc4 15,78-84,135-139,147-160,173,181,185,197-203,211-218,231-290,292-303,306,319,321,325-476
+clients/ts/src/index.ts
+  s_6e4d42fd38b763::t_5bef341930b3b3 31-40,286-290,297,300-301,306-316,331,334-338,343-347,358-359,361-388,390,392-397,407-422,424-441,444-445,510-658
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "c99a27ba352223441484dca8676d5b872705adc2",
+  "prompts": {},
+  "sessions": {
+    "s_6e4d42fd38b763": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7eb5473d-50d2-4208-a046-f760cf93bf2c",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    },
+    "s_8d898e9cb8f286": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b4090aa5-ff59-4cf9-90d6-2451d0d6108f",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
