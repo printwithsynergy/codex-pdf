@@ -1,8 +1,16 @@
 # Codex shared service image. Single source of truth for shared,
 # per-consumer, and hybrid Railway deployments. The same image runs
 # the FastAPI surface (`POST /v1/extract`, `/v1/render/...`, etc.).
+#
+# Two-stage build:
+#  - `builder` carries gcc / g++ / cmake / ninja so `uv sync` can
+#    compile the optional `[geom]` extra (pyclipr -> Clipper2 C++)
+#    from sdist when no manylinux wheel is available for our arch.
+#  - `base` is the runtime image; only the populated /opt/venv is
+#    copied in, keeping the final image lean (~280 MB) while still
+#    shipping the geom + redis surfaces.
 
-FROM python:3.12-slim AS base
+FROM python:3.12-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -12,7 +20,35 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     PATH="/opt/venv/bin:$PATH"
 
-# System packages:
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        ninja-build \
+        python3-dev \
+        ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+COPY schemas ./schemas
+COPY tests ./tests
+
+RUN uv sync --frozen --no-dev --extra redis --extra geom
+
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+# Runtime system packages:
 # - ghostscript (>=10) for png16m + tiffsep + simulate-overprint
 # - poppler-utils for pdftoppm/pdftotext fallbacks (TAC heatmap text bboxes)
 # - libheif1 for heif/avif preview ingest paths consumers might rely on
@@ -27,28 +63,20 @@ RUN apt-get update \
         curl \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
-
 # Non-root user.
 RUN useradd --system --create-home --shell /usr/sbin/nologin codex
 WORKDIR /app
 
+# Copy the pre-built venv from the builder stage and the project
+# sources. Chown to the runtime user so editable installs / module
+# imports don't trip on permission errors at boot.
+COPY --from=builder /opt/venv /opt/venv
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY schemas ./schemas
 COPY tests ./tests
 
-# Build the venv as root so the global cache is shared, then chown
-# everything to the non-root runtime user. Without this, `uv run` at
-# container start tries to repair the editable install and fails on
-# `/opt/venv/.../bin/codex-pdf: Permission denied` because the bin
-# entries land outside the dir tree the runtime user can write.
-# Install the `redis` extra unconditionally so a deploy that wires
-# CODEX_REDIS_URL to a Railway Redis service uses the shared cache,
-# AND a deploy that deletes the redis service still boots cleanly
-# (codex falls back to in-memory; see codex_pdf.api.cache.make_cache).
-RUN uv sync --frozen --no-dev --extra redis --extra geom \
- && chown -R codex:codex /opt/venv /app
+RUN chown -R codex:codex /opt/venv /app
 
 USER codex
 
