@@ -28,6 +28,16 @@ export type { CmykQuad as ColorCmykQuad, LabTriplet as ColorLabTriplet, RgbTripl
 export interface CodexClientOptions {
   /** Base URL of the codex API, e.g. `https://codex.example.com`. */
   baseUrl?: string;
+  /** Optional endpoint pool for multi-instance routing. */
+  baseUrls?: string[];
+  /** Optional plant/instance identifier (hybrid routing preference). */
+  plant?: string;
+  /** single | plant | failover | hybrid (default when pool >1). */
+  routeMode?: "single" | "plant" | "failover" | "hybrid";
+  /** Deterministic affinity key for stable target selection. */
+  affinityKey?: string;
+  /** Required section schema versions used to preflight failover targets. */
+  requiredSectionVersions?: Record<string, string>;
   bearerToken?: string;
   apiKey?: string;
   internalToken?: string;
@@ -273,21 +283,37 @@ const DEFAULT_MAX_RETRIES = 3;
  */
 export class HttpClient {
   readonly baseUrl: string;
+  readonly targets: { baseUrl: string; plant?: string }[];
+  readonly plant?: string;
+  readonly routeMode: "single" | "plant" | "failover" | "hybrid";
+  readonly affinityKey?: string;
+  readonly requiredSectionVersions: Record<string, string>;
   readonly bearerToken?: string;
   readonly apiKey?: string;
   readonly internalToken?: string;
   readonly timeoutMs: number;
   readonly maxRetries: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly contractCache: Map<string, Record<string, unknown>>;
 
   constructor(opts: CodexClientOptions = {}) {
-    const baseUrl = opts.baseUrl ?? envVar("CODEX_API_BASE");
-    if (!baseUrl) {
+    const targets = this.loadTargets(opts);
+    if (targets.length === 0) {
       throw new CodexClientError(
         "CODEX_API_BASE is not configured. The TypeScript codex client requires HTTP mode.",
       );
     }
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.targets = targets;
+    this.baseUrl = targets[0].baseUrl;
+    this.plant = opts.plant ?? envVar("CODEX_PLANT") ?? undefined;
+    this.routeMode =
+      opts.routeMode ??
+      ((envVar("CODEX_ROUTE_MODE") as "single" | "plant" | "failover" | "hybrid" | undefined) ??
+        (targets.length > 1 ? "hybrid" : "single"));
+    this.affinityKey =
+      opts.affinityKey ?? envVar("CODEX_AFFINITY_KEY") ?? envVar("CODEX_PLANT_AFFINITY_KEY") ?? undefined;
+    this.requiredSectionVersions =
+      opts.requiredSectionVersions ?? this.loadRequiredSectionVersions();
     this.bearerToken = opts.bearerToken ?? envVar("CODEX_BEARER_TOKEN");
     this.apiKey = opts.apiKey ?? envVar("CODEX_API_KEY");
     this.internalToken = opts.internalToken ?? envVar("CODEX_INTERNAL_TOKEN");
@@ -302,13 +328,23 @@ export class HttpClient {
       );
     }
     this.fetchImpl = fetchImpl;
+    this.contractCache = new Map();
   }
 
-  private headers(extra: Record<string, string> = {}): Record<string, string> {
+  private headers(
+    target: { baseUrl: string; plant?: string } | null,
+    requestId: string,
+    extra: Record<string, string> = {},
+  ): Record<string, string> {
     const out: Record<string, string> = {};
     if (this.bearerToken) out["Authorization"] = `Bearer ${this.bearerToken}`;
     if (this.apiKey) out["X-Codex-Key"] = this.apiKey;
     if (this.internalToken) out["X-Codex-Internal"] = this.internalToken;
+    out["X-Codex-Route-Mode"] = this.routeMode;
+    out["X-Codex-Request-Id"] = requestId;
+    if (this.affinityKey) out["X-Codex-Affinity-Key"] = this.affinityKey;
+    const effectivePlant = this.plant ?? target?.plant;
+    if (effectivePlant) out["X-Codex-Plant"] = effectivePlant;
     return { ...out, ...extra };
   }
 
@@ -319,42 +355,48 @@ export class HttpClient {
     contentType?: string,
   ): Promise<Response> {
     let lastErr: unknown;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const requestId = this.newRequestId();
+    for (const target of this.orderedTargets()) {
       try {
-        const headers: Record<string, string> = this.headers({ Accept: accept });
-        if (contentType) headers["Content-Type"] = contentType;
-        // For FormData, let fetch set Content-Type itself so the
-        // multipart boundary is correct; we only override for JSON
-        // and other explicit body types.
-        const res = await this.fetchImpl(this.baseUrl + path, {
-          method: "POST",
-          headers,
-          body,
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        if (res.ok) return res;
-        if (res.status === 408 || res.status === 429 || (res.status >= 500 && res.status < 600)) {
-          lastErr = new CodexClientError(`codex ${path} -> ${res.status}`, {
-            status: res.status,
-          });
-          await new Promise((r) => setTimeout(r, Math.min(2 ** attempt * 1000, 8000)));
-          continue;
-        }
-        const text = await res.text().catch(() => "");
-        throw new CodexClientError(`codex ${path} -> ${res.status}: ${text.slice(0, 1000)}`, {
-          status: res.status,
-          body: text,
-        });
+        await this.ensureContractCompatible(target, requestId);
       } catch (err) {
-        clearTimeout(timer);
         lastErr = err;
-        if (err instanceof CodexClientError && err.status >= 0 && err.status < 500) {
-          throw err;
+        continue;
+      }
+      for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+          const headers: Record<string, string> = this.headers(target, requestId, { Accept: accept });
+          if (contentType) headers["Content-Type"] = contentType;
+          const res = await this.fetchImpl(target.baseUrl + path, {
+            method: "POST",
+            headers,
+            body,
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (res.ok) return res;
+          if (res.status === 408 || res.status === 429 || (res.status >= 500 && res.status < 600)) {
+            lastErr = new CodexClientError(`codex ${path} -> ${res.status}`, {
+              status: res.status,
+            });
+            await new Promise((r) => setTimeout(r, Math.min(2 ** attempt * 1000, 8000)));
+            continue;
+          }
+          const text = await res.text().catch(() => "");
+          throw new CodexClientError(`codex ${path} -> ${res.status}: ${text.slice(0, 1000)}`, {
+            status: res.status,
+            body: text,
+          });
+        } catch (err) {
+          clearTimeout(timer);
+          lastErr = err;
+          if (err instanceof CodexClientError && err.status >= 0 && err.status < 500) {
+            throw err;
+          }
+          await new Promise((r) => setTimeout(r, Math.min(2 ** attempt * 1000, 8000)));
         }
-        await new Promise((r) => setTimeout(r, Math.min(2 ** attempt * 1000, 8000)));
       }
     }
     if (lastErr instanceof Error) throw lastErr;
@@ -362,26 +404,45 @@ export class HttpClient {
   }
 
   private async get(path: string): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      const res = await this.fetchImpl(this.baseUrl + path, {
-        method: "GET",
-        headers: this.headers(),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new CodexClientError(`codex ${path} -> ${res.status}: ${text.slice(0, 1000)}`, {
-          status: res.status,
-          body: text,
-        });
+    const requestId = this.newRequestId();
+    let lastErr: unknown;
+    for (const target of this.orderedTargets()) {
+      try {
+        await this.ensureContractCompatible(target, requestId);
+      } catch (err) {
+        lastErr = err;
+        continue;
       }
-      return res;
-    } finally {
-      clearTimeout(timer);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const res = await this.fetchImpl(target.baseUrl + path, {
+          method: "GET",
+          headers: this.headers(target, requestId),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          if (res.status === 408 || res.status === 429 || (res.status >= 500 && res.status < 600)) {
+            lastErr = new CodexClientError(`codex ${path} -> ${res.status}`, {
+              status: res.status,
+              body: text,
+            });
+            continue;
+          }
+          throw new CodexClientError(`codex ${path} -> ${res.status}: ${text.slice(0, 1000)}`, {
+            status: res.status,
+            body: text,
+          });
+        }
+        return res;
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    if (lastErr instanceof Error) throw lastErr;
+    throw new CodexClientError(`codex ${path} failed across all targets`);
   }
 
   private buildForm(
@@ -444,6 +505,157 @@ export class HttpClient {
       schema_id: string;
       endpoints: string[];
     };
+  }
+
+  private loadTargets(opts: CodexClientOptions): { baseUrl: string; plant?: string }[] {
+    const targets: { baseUrl: string; plant?: string }[] = [];
+    if (opts.baseUrl) {
+      targets.push({ baseUrl: opts.baseUrl.replace(/\/+$/, "") });
+      return targets;
+    }
+    if (opts.baseUrls && opts.baseUrls.length > 0) {
+      for (const url of opts.baseUrls) {
+        if (typeof url === "string" && url.trim()) {
+          targets.push({ baseUrl: url.trim().replace(/\/+$/, "") });
+        }
+      }
+      if (targets.length > 0) return targets;
+    }
+    const poolJson = envVar("CODEX_API_POOL_JSON");
+    if (poolJson) {
+      try {
+        const parsed = JSON.parse(poolJson);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item && typeof item === "object") {
+              const raw = (item as { base_url?: string; url?: string }).base_url ?? (item as { url?: string }).url;
+              if (typeof raw === "string" && raw.trim()) {
+                const plant = (item as { plant?: string }).plant;
+                targets.push({
+                  baseUrl: raw.trim().replace(/\/+$/, ""),
+                  plant: typeof plant === "string" && plant.trim() ? plant.trim() : undefined,
+                });
+              }
+            }
+          }
+        } else if (parsed && typeof parsed === "object") {
+          for (const [plant, raw] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof raw === "string" && raw.trim()) {
+              targets.push({ baseUrl: raw.trim().replace(/\/+$/, ""), plant });
+            }
+          }
+        }
+      } catch {
+        // ignore malformed pool JSON; fallback to CODEX_API_BASE(S)
+      }
+      if (targets.length > 0) return targets;
+    }
+    const baseList = envVar("CODEX_API_BASES");
+    if (baseList) {
+      for (const token of baseList.split(",")) {
+        const item = token.trim();
+        if (!item) continue;
+        if (item.includes("=")) {
+          const [plant, raw] = item.split("=", 2);
+          if (raw?.trim()) {
+            targets.push({ baseUrl: raw.trim().replace(/\/+$/, ""), plant: plant.trim() || undefined });
+          }
+        } else {
+          targets.push({ baseUrl: item.replace(/\/+$/, "") });
+        }
+      }
+      if (targets.length > 0) return targets;
+    }
+    const envBase = envVar("CODEX_API_BASE");
+    if (envBase && envBase.trim()) {
+      targets.push({ baseUrl: envBase.trim().replace(/\/+$/, "") });
+    }
+    return targets;
+  }
+
+  private loadRequiredSectionVersions(): Record<string, string> {
+    const raw = envVar("CODEX_REQUIRED_SECTION_VERSIONS");
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof k === "string" && typeof v === "string" && k && v) out[k] = v;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  private orderedTargets(): { baseUrl: string; plant?: string }[] {
+    if (this.targets.length <= 1 || this.routeMode === "single") return [this.targets[0]!];
+    let preferred = this.targets.filter((t) => this.plant && t.plant === this.plant);
+    let others = this.targets.filter((t) => !this.plant || t.plant !== this.plant);
+    if (preferred.length === 0) {
+      preferred = [this.targets[0]!];
+      others = this.targets.slice(1);
+    }
+    const orderedPreferred = this.rotateByAffinity(preferred);
+    const orderedOthers = this.rotateByAffinity(others);
+    if (this.routeMode === "plant") return orderedPreferred;
+    const merged = [...orderedPreferred];
+    for (const target of orderedOthers) {
+      if (!merged.some((m) => m.baseUrl === target.baseUrl)) merged.push(target);
+    }
+    return merged;
+  }
+
+  private rotateByAffinity(targets: { baseUrl: string; plant?: string }[]): {
+    baseUrl: string;
+    plant?: string;
+  }[] {
+    if (targets.length <= 1 || !this.affinityKey) return [...targets];
+    const key = this.affinityKey;
+    let hash = 2166136261;
+    for (let i = 0; i < key.length; i += 1) {
+      hash ^= key.charCodeAt(i);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    const offset = hash % targets.length;
+    return [...targets.slice(offset), ...targets.slice(0, offset)];
+  }
+
+  private newRequestId(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  private async ensureContractCompatible(
+    target: { baseUrl: string; plant?: string },
+    requestId: string,
+  ): Promise<void> {
+    if (Object.keys(this.requiredSectionVersions).length === 0) return;
+    const cached = this.contractCache.get(target.baseUrl);
+    let payload = cached;
+    if (!payload) {
+      const res = await this.fetchImpl(target.baseUrl + "/v1/contract", {
+        method: "GET",
+        headers: this.headers(target, requestId),
+      });
+      if (!res.ok) {
+        throw new CodexClientError(`failed to read /v1/contract from ${target.baseUrl}`, {
+          status: res.status,
+        });
+      }
+      payload = (await res.json()) as Record<string, unknown>;
+      this.contractCache.set(target.baseUrl, payload);
+    }
+    const sections = payload.section_schema_versions as Record<string, unknown> | undefined;
+    for (const [name, required] of Object.entries(this.requiredSectionVersions)) {
+      const got = sections?.[name];
+      if (typeof got !== "string" || got !== required) {
+        throw new CodexClientError(
+          `${target.baseUrl} incompatible section schema '${name}': required ${required}, got ${String(got)}`,
+          { status: -1 },
+        );
+      }
+    }
   }
 
   async schema(name: string): Promise<unknown> {

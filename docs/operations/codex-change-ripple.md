@@ -62,6 +62,17 @@ curl -fsS https://codex-pdf-production.up.railway.app/v1/contract | jq .package_
 # "1.3.1"
 ```
 
+In multi-plant mode, also verify contract compatibility and failover:
+
+```bash
+curl -fsS https://<plant-codex>/v1/contract | jq .section_schema_versions
+curl -fsS https://<shared-codex>/v1/contract | jq .section_schema_versions
+```
+
+Both maps must satisfy each consumer's
+`CODEX_REQUIRED_SECTION_VERSIONS`. Then force one plant endpoint down
+and re-run each smoke script to confirm hybrid failover works.
+
 ## Why a fixed order matters
 
 - Marketing sites cache the codex base URL at build time when the
@@ -92,5 +103,8 @@ change one env var on the marketing service:
 - Shared: `CODEX_API_BASE_URL=https://codex-pdf-production.up.railway.app`
 - Sidecar: `CODEX_API_BASE_URL=https://${{codex-sidecar.RAILWAY_PRIVATE_DOMAIN}}`
   (Railway service-reference; resolves at deploy time)
+- Multi-plant hybrid:
+  `CODEX_API_BASES=plant-a=https://<codex-a>,shared=https://<codex-shared>`
+  + `CODEX_ROUTE_MODE=hybrid` + `CODEX_PLANT=plant-a`
 
 See `codex-pdf/docs/deploy.md` for the full switch-back recipe.

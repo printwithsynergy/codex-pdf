@@ -34,6 +34,52 @@ describe("HttpClient", () => {
     expect(captured?.get("authorization")).toBe("Bearer tok");
     expect(captured?.get("x-codex-key")).toBe("key");
     expect(captured?.get("x-codex-internal")).toBe("int");
+    expect(captured?.get("x-codex-route-mode")).toBe("single");
+    expect(captured?.get("x-codex-request-id")).toBeTruthy();
+  });
+
+  it("fails over between targets in hybrid mode", async () => {
+    const seen: string[] = [];
+    const fakeFetch: typeof fetch = async (url) => {
+      const u = String(url);
+      seen.push(u);
+      if (u === "https://a.example.com/v1/contract") {
+        return new Response(
+          JSON.stringify({
+            contract_name: "codex-document",
+            section_schema_versions: { color: "0.9.0", geom: "1.0.0" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (u === "https://b.example.com/v1/contract") {
+        return new Response(
+          JSON.stringify({
+            contract_name: "codex-document",
+            section_schema_versions: { color: "1.0.0", geom: "1.0.0" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (u === "https://b.example.com/v1/healthz") {
+        return new Response(
+          JSON.stringify({ status: "ok", version: "1.4.2", ghostscript: true }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    };
+    const client = new HttpClient({
+      baseUrls: ["https://a.example.com", "https://b.example.com"],
+      routeMode: "hybrid",
+      requiredSectionVersions: { color: "1.0.0" },
+      fetch: fakeFetch,
+    });
+    const health = await client.healthz();
+    expect(health.version).toBe("1.4.2");
+    expect(seen).toContain("https://a.example.com/v1/contract");
+    expect(seen).toContain("https://b.example.com/v1/contract");
+    expect(seen).toContain("https://b.example.com/v1/healthz");
   });
 
   it("retries 5xx then returns body", async () => {

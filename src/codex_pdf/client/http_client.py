@@ -12,6 +12,7 @@ Both modes share the same return shapes so callers don't branch.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -74,6 +75,13 @@ class HeatmapResult:
     runs: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class RouteTarget:
+    base_url: str
+    plant: str | None = None
+    role: str | None = None
+
+
 def _bool_env(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -124,6 +132,11 @@ class HttpClient:
         self,
         *,
         base_url: str | None = None,
+        base_urls: list[str] | None = None,
+        plant: str | None = None,
+        route_mode: str | None = None,
+        affinity_key: str | None = None,
+        required_section_versions: dict[str, str] | None = None,
         bearer_token: str | None = None,
         api_key: str | None = None,
         internal_token: str | None = None,
@@ -131,7 +144,20 @@ class HttpClient:
         max_retries: int = 3,
         local_fallback: bool | None = None,
     ) -> None:
-        self.base_url = base_url or os.environ.get("CODEX_API_BASE")
+        self.targets = self._load_targets(base_url=base_url, base_urls=base_urls)
+        self.base_url = self.targets[0].base_url if self.targets else None
+        self.plant = (plant or os.environ.get("CODEX_PLANT") or "").strip() or None
+        detected_route_mode = route_mode or os.environ.get("CODEX_ROUTE_MODE")
+        if detected_route_mode:
+            self.route_mode = detected_route_mode.strip().lower()
+        else:
+            self.route_mode = "hybrid" if len(self.targets) > 1 else "single"
+        self.affinity_key = (
+            affinity_key
+            or os.environ.get("CODEX_AFFINITY_KEY")
+            or os.environ.get("CODEX_PLANT_AFFINITY_KEY")
+        )
+        self.required_section_versions = required_section_versions or self._load_required_sections()
         self.bearer_token = bearer_token or os.environ.get("CODEX_BEARER_TOKEN")
         self.api_key = api_key or os.environ.get("CODEX_API_KEY")
         self.internal_token = internal_token or os.environ.get("CODEX_INTERNAL_TOKEN")
@@ -144,6 +170,7 @@ class HttpClient:
         if local_fallback is None:
             local_fallback = _bool_env("CODEX_LOCAL_FALLBACK", default=True)
         self.local_fallback = local_fallback
+        self._contract_cache: dict[str, dict[str, Any]] = {}
 
     # -----------------------------------------------------------------
     # Mode selection.
@@ -151,11 +178,11 @@ class HttpClient:
 
     @property
     def is_http(self) -> bool:
-        return bool(self.base_url)
+        return bool(self.targets)
 
     def _require_http_or_local(self) -> str | None:
         if self.is_http:
-            return self.base_url
+            return self.targets[0].base_url
         if self.local_fallback:
             return None
         raise CodexClientError(
@@ -167,7 +194,13 @@ class HttpClient:
     # Low-level HTTP helpers (urllib so we have no third-party dep).
     # -----------------------------------------------------------------
 
-    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+    def _headers(
+        self,
+        *,
+        target: RouteTarget | None = None,
+        request_id: str | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         headers: dict[str, str] = {}
         if self.bearer_token:
             headers["Authorization"] = f"Bearer {self.bearer_token}"
@@ -175,6 +208,14 @@ class HttpClient:
             headers["X-Codex-Key"] = self.api_key
         if self.internal_token:
             headers["X-Codex-Internal"] = self.internal_token
+        headers["X-Codex-Route-Mode"] = self.route_mode
+        if request_id:
+            headers["X-Codex-Request-Id"] = request_id
+        if self.affinity_key:
+            headers["X-Codex-Affinity-Key"] = self.affinity_key
+        effective_plant = self.plant or (target.plant if target else None)
+        if effective_plant:
+            headers["X-Codex-Plant"] = effective_plant
         if extra:
             headers.update(extra)
         return headers
@@ -187,22 +228,85 @@ class HttpClient:
         content_type: str,
         accept: str = "*/*",
     ) -> tuple[int, bytes, dict[str, str]]:
-        assert self.base_url is not None
-        url = self.base_url.rstrip("/") + path
-        headers = self._headers({"Content-Type": content_type, "Accept": accept})
+        request_id = secrets.token_hex(8)
         last_exc: Exception | None = None
-        for attempt in range(self.max_retries + 1):
-            req = urlrequest.Request(url, data=body, headers=headers, method="POST")
+        for target in self._ordered_targets():
+            try:
+                self._ensure_contract_compatible(target, request_id=request_id)
+            except CodexClientError as exc:
+                last_exc = exc
+                logger.warning("codex target skipped due to contract mismatch: %s", target.base_url)
+                continue
+            url = target.base_url.rstrip("/") + path
+            headers = self._headers(
+                target=target,
+                request_id=request_id,
+                extra={"Content-Type": content_type, "Accept": accept},
+            )
+            for attempt in range(self.max_retries + 1):
+                req = urlrequest.Request(url, data=body, headers=headers, method="POST")
+                try:
+                    with urlrequest.urlopen(req, timeout=self.timeout_seconds) as resp:
+                        raw = resp.read()
+                        return resp.getcode(), raw, dict(resp.headers.items())
+                except urlerror.HTTPError as exc:
+                    if exc.code in {408, 429} or 500 <= exc.code < 600:
+                        last_exc = exc
+                        backoff = min(2.0 ** attempt, 8.0)
+                        logger.warning(
+                            "codex %s -> %d on %s, retry %d in %.1fs",
+                            path,
+                            exc.code,
+                            target.base_url,
+                            attempt,
+                            backoff,
+                        )
+                        time.sleep(backoff)
+                        continue
+                    detail = exc.read().decode("utf-8", errors="replace")[:1000]
+                    raise CodexClientError(
+                        f"codex {path} -> {exc.code}: {detail}",
+                        status=exc.code,
+                        body=detail,
+                    ) from exc
+                except Exception as exc:
+                    last_exc = exc
+                    backoff = min(2.0 ** attempt, 8.0)
+                    logger.warning(
+                        "codex %s transport failure on %s, retry %d in %.1fs",
+                        path,
+                        target.base_url,
+                        attempt,
+                        backoff,
+                    )
+                    time.sleep(backoff)
+            logger.warning("codex target failed after retries: %s", target.base_url)
+        raise CodexClientError(
+            f"codex {path} failed across {max(1, len(self.targets))} targets: {last_exc}",
+            status=-1,
+        )
+
+    def _get(self, path: str) -> tuple[int, bytes, dict[str, str]]:
+        request_id = secrets.token_hex(8)
+        last_exc: Exception | None = None
+        for target in self._ordered_targets():
+            try:
+                self._ensure_contract_compatible(target, request_id=request_id)
+            except CodexClientError as exc:
+                last_exc = exc
+                continue
+            url = target.base_url.rstrip("/") + path
+            req = urlrequest.Request(
+                url,
+                headers=self._headers(target=target, request_id=request_id),
+                method="GET",
+            )
             try:
                 with urlrequest.urlopen(req, timeout=self.timeout_seconds) as resp:
-                    raw = resp.read()
-                    return resp.getcode(), raw, dict(resp.headers.items())
+                    return resp.getcode(), resp.read(), dict(resp.headers.items())
             except urlerror.HTTPError as exc:
                 if exc.code in {408, 429} or 500 <= exc.code < 600:
                     last_exc = exc
-                    backoff = min(2.0 ** attempt, 8.0)
-                    logger.warning("codex %s -> %d, retry %d in %.1fs", path, exc.code, attempt, backoff)
-                    time.sleep(backoff)
                     continue
                 detail = exc.read().decode("utf-8", errors="replace")[:1000]
                 raise CodexClientError(
@@ -212,20 +316,164 @@ class HttpClient:
                 ) from exc
             except Exception as exc:
                 last_exc = exc
-                backoff = min(2.0 ** attempt, 8.0)
-                logger.warning("codex %s transport failure, retry %d in %.1fs", path, attempt, backoff)
-                time.sleep(backoff)
+                continue
         raise CodexClientError(
-            f"codex {path} failed after {self.max_retries + 1} attempts: {last_exc}",
+            f"codex {path} failed across {max(1, len(self.targets))} targets: {last_exc}",
             status=-1,
         )
 
-    def _get(self, path: str) -> tuple[int, bytes, dict[str, str]]:
-        assert self.base_url is not None
-        url = self.base_url.rstrip("/") + path
-        req = urlrequest.Request(url, headers=self._headers(), method="GET")
-        with urlrequest.urlopen(req, timeout=self.timeout_seconds) as resp:
-            return resp.getcode(), resp.read(), dict(resp.headers.items())
+    def _load_targets(
+        self,
+        *,
+        base_url: str | None,
+        base_urls: list[str] | None,
+    ) -> list[RouteTarget]:
+        targets: list[RouteTarget] = []
+        if base_url:
+            targets.append(RouteTarget(base_url=base_url.strip()))
+            return targets
+        if base_urls:
+            targets.extend(
+                RouteTarget(base_url=url.strip()) for url in base_urls if isinstance(url, str) and url.strip()
+            )
+            if targets:
+                return targets
+
+        pool_json_raw = (os.environ.get("CODEX_API_POOL_JSON") or "").strip()
+        if pool_json_raw:
+            try:
+                pool = json.loads(pool_json_raw)
+                if isinstance(pool, list):
+                    for item in pool:
+                        if not isinstance(item, dict):
+                            continue
+                        url = str(item.get("base_url") or item.get("url") or "").strip()
+                        if not url:
+                            continue
+                        plant = str(item.get("plant") or "").strip() or None
+                        role = str(item.get("role") or "").strip() or None
+                        targets.append(RouteTarget(base_url=url, plant=plant, role=role))
+                elif isinstance(pool, dict):
+                    for plant, url in pool.items():
+                        if not isinstance(url, str) or not url.strip():
+                            continue
+                        targets.append(RouteTarget(base_url=url.strip(), plant=str(plant)))
+            except Exception:
+                logger.warning("failed to parse CODEX_API_POOL_JSON; falling back to CODEX_API_BASE")
+        if targets:
+            return targets
+
+        bases_raw = (os.environ.get("CODEX_API_BASES") or "").strip()
+        if bases_raw:
+            for token in bases_raw.split(","):
+                cleaned = token.strip()
+                if not cleaned:
+                    continue
+                if "=" in cleaned:
+                    plant, url = cleaned.split("=", 1)
+                    targets.append(RouteTarget(base_url=url.strip(), plant=plant.strip() or None))
+                else:
+                    targets.append(RouteTarget(base_url=cleaned))
+            if targets:
+                return targets
+
+        env_base = (os.environ.get("CODEX_API_BASE") or "").strip()
+        if env_base:
+            targets.append(RouteTarget(base_url=env_base))
+        return targets
+
+    def _ordered_targets(self) -> list[RouteTarget]:
+        if not self.targets:
+            return []
+        if self.route_mode == "single":
+            return [self.targets[0]]
+
+        same_plant: list[RouteTarget] = []
+        others: list[RouteTarget] = []
+        for target in self.targets:
+            if self.plant and target.plant and target.plant == self.plant:
+                same_plant.append(target)
+            else:
+                others.append(target)
+        if not same_plant:
+            same_plant = []
+            others = list(self.targets)
+
+        ordered_primary = self._rotate_by_affinity(same_plant or [self.targets[0]])
+        ordered_secondary = self._rotate_by_affinity(others)
+        if self.route_mode == "plant":
+            return ordered_primary
+        if self.route_mode == "failover":
+            return ordered_primary + ordered_secondary
+        # hybrid (default): plant-affine first, then failover pool.
+        return ordered_primary + [t for t in ordered_secondary if t not in ordered_primary]
+
+    def _rotate_by_affinity(self, targets: list[RouteTarget]) -> list[RouteTarget]:
+        if len(targets) <= 1 or not self.affinity_key:
+            return list(targets)
+        digest = hashlib.sha256(self.affinity_key.encode("utf-8", "ignore")).digest()
+        offset = int.from_bytes(digest[:4], "big") % len(targets)
+        return targets[offset:] + targets[:offset]
+
+    def _load_required_sections(self) -> dict[str, str]:
+        raw = (os.environ.get("CODEX_REQUIRED_SECTION_VERSIONS") or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            logger.warning("failed to parse CODEX_REQUIRED_SECTION_VERSIONS JSON")
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        out: dict[str, str] = {}
+        for key, value in parsed.items():
+            if isinstance(key, str) and isinstance(value, str) and key and value:
+                out[key] = value
+        return out
+
+    def _ensure_contract_compatible(self, target: RouteTarget, *, request_id: str) -> None:
+        if not self.required_section_versions:
+            return
+        cached = self._contract_cache.get(target.base_url)
+        if cached is None:
+            url = target.base_url.rstrip("/") + "/v1/contract"
+            req = urlrequest.Request(
+                url,
+                headers=self._headers(target=target, request_id=request_id),
+                method="GET",
+            )
+            try:
+                with urlrequest.urlopen(req, timeout=self.timeout_seconds) as resp:
+                    payload = json.loads(resp.read() or b"{}")
+            except Exception as exc:
+                raise CodexClientError(
+                    f"failed to read contract from {target.base_url}: {exc}",
+                    status=-1,
+                ) from exc
+            if not isinstance(payload, dict):
+                raise CodexClientError(
+                    f"invalid contract payload from {target.base_url}",
+                    status=-1,
+                )
+            cached = payload
+            self._contract_cache[target.base_url] = cached
+
+        section_versions = cached.get("section_schema_versions") or {}
+        if not isinstance(section_versions, dict):
+            section_versions = {}
+        for section, required in self.required_section_versions.items():
+            got = section_versions.get(section)
+            if got is None:
+                raise CodexClientError(
+                    f"{target.base_url} missing required section '{section}' in contract",
+                    status=-1,
+                )
+            if str(got) != str(required):
+                raise CodexClientError(
+                    f"{target.base_url} incompatible section '{section}': required {required}, got {got}",
+                    status=-1,
+                )
 
     @staticmethod
     def _coerce_bytes(pdf: bytes | BinaryIO | str | os.PathLike[str]) -> bytes:
