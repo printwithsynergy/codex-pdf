@@ -1,0 +1,19 @@
+Dockerfile
+  s_f2a9cf6cf331fd::t_02c6f5aff35264 4-11,13,23-51,70-73,79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "1adf7255f06d7b2ecdbeb48057cfa8fc149f5a5f",
+  "prompts": {},
+  "sessions": {
+    "s_f2a9cf6cf331fd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d3d46a94-285b-4b65-a130-25e630f5d99d",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
