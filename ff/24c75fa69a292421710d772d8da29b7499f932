@@ -1,0 +1,35 @@
+Dockerfile
+  s_9b5cc9427311dc::t_51549e214428f9 46-50
+src/codex_pdf/api/main.py
+  s_9b5cc9427311dc::t_b4629919f3a151 191
+  s_9b5cc9427311dc::t_0e22c449678821 258-263
+tests/test_cache.py
+  s_9b5cc9427311dc::t_09a569d730363c 1-152
+docs/operations/codex-change-ripple.md
+  s_9b5cc9427311dc::t_f2768099d3d1b1 1-96
+pyproject.toml
+  s_9b5cc9427311dc::t_891ff760e351cc 23-24,26-27
+  s_9b5cc9427311dc::t_d0f6ebed737489 7
+src/codex_pdf/version.py
+  s_9b5cc9427311dc::t_7a0a22b3a311f3 3-10,15
+src/codex_pdf/api/cache.py
+  s_9b5cc9427311dc::t_766d801a41e025 5-11,43-44,64-74,79,81-83,85-97,104,111,117-127,129-160
+docs/operations/marketing-deploy-template.md
+  s_9b5cc9427311dc::t_5ed7fc44d87ba4 1-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "ff24c75fa69a292421710d772d8da29b7499f932",
+  "prompts": {},
+  "sessions": {
+    "s_9b5cc9427311dc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0dfc135d-672d-426a-9d16-83de130473b9",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
