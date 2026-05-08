@@ -1,0 +1,43 @@
+schemas/v1/codex-document.schema.json
+  s_c3fafa1663725b::t_5a162725f09a99 1913-1915
+  s_c3fafa1663725b::t_cb2978108d9cb8 1534-1685,1728-1730
+  s_c3fafa1663725b::t_00ab2e5875e1e6 1723-1727,1910,1912,1921-1931
+src/codex_pdf/models/v1.py
+  s_c3fafa1663725b::t_66044d0b5d338c 317-326
+  s_c3fafa1663725b::t_1328d05e28024c 360-377,384
+  s_c3fafa1663725b::t_c8c428011fb1a8 327,383
+src/codex_pdf/extract/dieline_detector.py
+  s_c3fafa1663725b::t_68f4266d23f28d 1-12,14-178,319-399,403-406,408-409,411
+  s_c3fafa1663725b::t_505190dc48ef7a 13,179-297,299-318,400-402,407,410
+  s_c3fafa1663725b::t_bb6808cabd92db 298
+src/codex_pdf/extract/summary.py
+  s_c3fafa1663725b::t_925e3fb95d684d 6,34,86,89,91-92,276
+  s_c3fafa1663725b::t_f30353dce1c48e 5,35-45,47-48,50-61,63,66-68,70-71,74-84,87,90,93-129,131-141,143-146,148-160,163-164
+scripts/calibrate_dieline_heuristics.py
+  s_c3fafa1663725b::t_e6c02c4d8d4382 1-92
+tests/test_summary_spot_colors.py
+  s_c3fafa1663725b::t_44fd669453d1c8 1-58
+reports/dieline_calibration_report.json
+  s_c3fafa1663725b::t_98cd27854047bf 1-10
+tests/test_summary_dieline.py
+  s_c3fafa1663725b::t_731fc05f7773c3 1-5,29,97-162
+  s_c3fafa1663725b::t_ae7a605be3730d 61-68,95-96
+pyproject.toml
+  s_c3fafa1663725b::t_be7b21c07e3d3b 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "286b4dc8604f44642de566a5b492cf8f11d99e7e",
+  "prompts": {},
+  "sessions": {
+    "s_c3fafa1663725b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8fffbee6-afc7-46e8-b040-87b38849be01",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
