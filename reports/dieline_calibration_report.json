@@ -1,0 +1,10 @@
+{
+  "dataset": "synthetic-structural-v1",
+  "negative_samples": 50,
+  "positive_samples": 25,
+  "negative_hits": 0,
+  "positive_hits": 25,
+  "false_positive_rate": 0.0,
+  "recall": 1.0,
+  "budget_false_positive_max": 0.03
+}

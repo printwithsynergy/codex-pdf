@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import re
-from typing import Any
-
+from codex_pdf.color.resolver import CodexSpotIntent, resolve_spot_swatch_color
+from codex_pdf.extract.dieline_detector import detect_dieline
 from codex_pdf.models.v1 import (
     CodexDocument,
     CodexDocumentSummary,
     CodexSummaryCountMetrics,
-    CodexSummaryDielineCandidate,
-    CodexSummaryDielineMetrics,
     CodexSummaryImageMetrics,
     CodexSummaryPageMetrics,
     CodexSummaryPageSize,
@@ -18,12 +15,6 @@ from codex_pdf.models.v1 import (
     CodexSummarySpotColor,
     CodexSummarySpotColorMetrics,
 )
-
-_DIELINE_PATTERN = re.compile(
-    r"(dieline|die ?line|cut ?line|kiss ?cut|crease|fold|trim|perf|knife|cutter)",
-    re.IGNORECASE,
-)
-
 
 def _normalize_color_component(value: float) -> float:
     if value <= 1.0:
@@ -38,280 +29,142 @@ def _to_u8(component: float) -> int:
 def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
     return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
 
-
-def _fallback_hex(name: str) -> str:
-    # Stable name-derived swatches keep demo rendering deterministic.
-    acc = 2166136261
-    for byte in name.encode("utf-8", "ignore"):
-        acc ^= byte
-        acc = (acc * 16777619) & 0xFFFFFFFF
-    r = 55 + (acc & 0x7F)
-    g = 55 + ((acc >> 8) & 0x7F)
-    b = 55 + ((acc >> 16) & 0x7F)
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
 def _spot_colors(doc: CodexDocument) -> CodexSummarySpotColorMetrics:
     by_name: dict[str, CodexSummarySpotColor] = {}
+    color_space_by_id = {space.id: space for space in doc.color_spaces}
+
+    def _analysis_spot_names() -> list[str]:
+        analysis = doc.analysis if isinstance(doc.analysis, dict) else {}
+        names: list[str] = []
+        raw_top = analysis.get("spot_names")
+        if isinstance(raw_top, list):
+            for raw in raw_top:
+                if isinstance(raw, str) and raw.strip():
+                    names.append(raw.strip())
+        for key, value in analysis.items():
+            if not key.startswith("page_") or not isinstance(value, dict):
+                continue
+            cs_to_spot = value.get("cs_to_spot")
+            if not isinstance(cs_to_spot, dict):
+                continue
+            for raw in cs_to_spot.values():
+                if isinstance(raw, str) and raw.strip():
+                    names.append(raw.strip())
+        out: list[str] = []
+        seen: set[str] = set()
+        for name in names:
+            k = name.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(name)
+        return out
+
+    def _add_spot(
+        *,
+        name: str,
+        intent: CodexSpotIntent | None,
+        prefer_icc_alternate: bool = False,
+        icc_note: str | None = None,
+    ) -> None:
+        key = name.strip().lower()
+        if not key or key in by_name:
+            return
+
+        resolved = resolve_spot_swatch_color(name, codex_intent=intent)
+        rgb_u8 = resolved.rgb
+        swatch_hex = _rgb_to_hex(rgb_u8)
+        swatch_source = resolved.source
+        swatch_note = f"Resolved from {resolved.source}"
+
+        if prefer_icc_alternate and intent is not None and (intent.rgb or intent.cmyk):
+            swatch_source = "icc_alternate"
+            swatch_note = icc_note or "ICCBased alternate intent"
+        elif intent is not None:
+            if intent.rgb is not None:
+                swatch_source = "rgb"
+                swatch_note = "RGB from extractor"
+            elif intent.cmyk is not None:
+                swatch_source = "cmyk"
+                swatch_note = "Projected from CMYK"
+            elif intent.lab is not None:
+                swatch_source = "lab"
+                swatch_note = "Projected from LAB"
+            elif intent.pantone_name:
+                swatch_source = "pantone"
+                swatch_note = f"Pantone {intent.pantone_name}"
+            elif resolved.source in {"curated", "hash"}:
+                swatch_source = resolved.source
+                swatch_note = (
+                    "Curated semantic fallback"
+                    if resolved.source == "curated"
+                    else "Deterministic hash fallback"
+                )
+            else:
+                swatch_source = "fallback"
+                swatch_note = "Fallback resolver"
+        else:
+            if resolved.source in {"pantone", "curated", "hash"}:
+                swatch_source = resolved.source
+                swatch_note = (
+                    "Pantone name match"
+                    if resolved.source == "pantone"
+                    else "Curated semantic fallback"
+                    if resolved.source == "curated"
+                    else "Deterministic hash fallback"
+                )
+            else:
+                swatch_source = "fallback"
+                swatch_note = "Analysis-only spot fallback"
+
+        by_name[key] = CodexSummarySpotColor(
+            name=name,
+            swatch_hex=swatch_hex,
+            swatch_source=swatch_source,  # type: ignore[arg-type]
+            swatch_note=swatch_note,
+            rgb=rgb_u8,
+            cmyk=intent.cmyk if intent else None,
+            lab=intent.lab if intent else None,
+            pantone_name=intent.pantone_name if intent else resolved.pantone_name,
+        )
+
     for cs in doc.color_spaces:
         for colorant in cs.spot_colorants:
             name = colorant.name.strip()
             if not name:
                 continue
-            if name in by_name:
-                continue
-
-            swatch_source = "fallback"
-            rgb_u8: tuple[int, int, int] | None = None
-            cmyk_norm: tuple[float, float, float, float] | None = None
-            swatch_hex = _fallback_hex(name)
-
-            if colorant.rgb is not None:
-                rgb_u8 = tuple(_to_u8(_normalize_color_component(v)) for v in colorant.rgb)  # type: ignore[assignment]
-                swatch_hex = _rgb_to_hex(rgb_u8)
-                swatch_source = "rgb"
-            elif colorant.cmyk is not None:
-                cmyk_norm = tuple(_normalize_color_component(v) for v in colorant.cmyk)  # type: ignore[assignment]
-                c, m, y, k = cmyk_norm
-                rgb_u8 = (
-                    _to_u8((1 - c) * (1 - k)),
-                    _to_u8((1 - m) * (1 - k)),
-                    _to_u8((1 - y) * (1 - k)),
-                )
-                swatch_hex = _rgb_to_hex(rgb_u8)
-                swatch_source = "cmyk"
-
-            by_name[name] = CodexSummarySpotColor(
-                name=name,
-                swatch_hex=swatch_hex,
-                swatch_source=swatch_source,  # type: ignore[arg-type]
-                rgb=rgb_u8,
-                cmyk=cmyk_norm,
-                lab=colorant.lab,
-                pantone_name=colorant.pantone_name,
+            alt_id = colorant.alternate_space_id or cs.alternate_space_id
+            alt_space = color_space_by_id.get(alt_id) if alt_id else None
+            normalized_cmyk = (
+                tuple(_normalize_color_component(v) for v in colorant.cmyk)
+                if colorant.cmyk is not None
+                else None
             )
+            normalized_rgb = (
+                tuple(_to_u8(_normalize_color_component(v)) for v in colorant.rgb)
+                if colorant.rgb is not None
+                else None
+            )
+            _add_spot(
+                name=name,
+                intent=CodexSpotIntent(
+                    rgb=normalized_rgb,  # type: ignore[arg-type]
+                    cmyk=normalized_cmyk,  # type: ignore[arg-type]
+                    lab=colorant.lab,  # type: ignore[arg-type]
+                    pantone_name=colorant.pantone_name,
+                ),
+                prefer_icc_alternate=(
+                    cs.family == "ICCBased"
+                    or (alt_space is not None and alt_space.family == "ICCBased")
+                ),
+                icc_note=f"ICCBased alternate via {alt_id or 'unknown'}",
+            )
+
+    for analysis_name in _analysis_spot_names():
+        _add_spot(name=analysis_name, intent=None)
 
     colors = sorted(by_name.values(), key=lambda item: item.name.lower())
     return CodexSummarySpotColorMetrics(count=len(colors), colors=colors)
-
-
-def _dieline_candidates(doc: CodexDocument) -> CodexSummaryDielineMetrics:
-    candidates: list[CodexSummaryDielineCandidate] = []
-    seen: set[tuple[str, str, str | None]] = set()
-
-    def _add(
-        *,
-        name: str,
-        source: str,
-        ocg_id: str | None = None,
-        processing_step: str | None = None,
-        confidence: float = 0.5,
-        reason_codes: list[str] | None = None,
-    ) -> None:
-        trimmed = name.strip()
-        if not trimmed:
-            return
-        dedupe_key = (trimmed.lower(), source, ocg_id)
-        if dedupe_key in seen:
-            return
-        seen.add(dedupe_key)
-        candidates.append(
-            CodexSummaryDielineCandidate(
-                name=trimmed,
-                source=source,  # type: ignore[arg-type]
-                ocg_id=ocg_id,
-                processing_step=processing_step,
-                confidence=max(0.0, min(1.0, confidence)),
-                reason_codes=sorted(set(reason_codes or [])),  # type: ignore[arg-type]
-            )
-        )
-
-    for ocg in doc.ocgs:
-        if _DIELINE_PATTERN.search(ocg.name):
-            _add(
-                name=ocg.name,
-                source="ocg_name",
-                ocg_id=ocg.ocg_id,
-                confidence=0.95,
-                reason_codes=["name_keyword"],
-            )
-        if ocg.iso19593_processing_step and _DIELINE_PATTERN.search(
-            ocg.iso19593_processing_step
-        ):
-            _add(
-                name=ocg.iso19593_processing_step,
-                source="ocg_processing_step",
-                ocg_id=ocg.ocg_id,
-                processing_step=ocg.iso19593_processing_step,
-                confidence=0.98,
-                reason_codes=["iso19593_processing_step"],
-            )
-
-    for layer in doc.trap_evidence.trap_layers:
-        layer_name = layer.name or layer.processing_step
-        if layer_name and _DIELINE_PATTERN.search(layer_name):
-            _add(
-                name=layer_name,
-                source="trap_layer",
-                ocg_id=layer.ocg_id,
-                processing_step=layer.processing_step,
-                confidence=0.9,
-                reason_codes=["trap_layer_keyword"],
-            )
-
-    for page_num, page_signal in _iter_page_signals(doc.analysis):
-        signal_hits = _dieline_signal_candidates(page_num, page_signal)
-        for hit_name, hit_confidence, hit_reasons in signal_hits:
-            _add(
-                name=hit_name,
-                source="analysis_signal",
-                confidence=hit_confidence,
-                reason_codes=hit_reasons,
-            )
-
-    return CodexSummaryDielineMetrics(
-        count=len(candidates),
-        candidates=candidates,
-        overall_confidence=max((c.confidence for c in candidates), default=0.0),
-        trapped_flag=doc.trapped_flag,
-    )
-
-
-def _iter_page_signals(analysis: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
-    out: list[tuple[int, dict[str, Any]]] = []
-    for key, value in analysis.items():
-        if not isinstance(value, dict):
-            continue
-        if key.startswith("page_"):
-            suffix = key.removeprefix("page_")
-            if suffix.isdigit():
-                out.append((int(suffix), value))
-    return sorted(out, key=lambda item: item[0])
-
-
-def _as_float(value: Any) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
-
-
-def _dieline_signal_candidates(
-    page_num: int,
-    page_signal: dict[str, Any],
-) -> list[tuple[str, float, list[str]]]:
-    content_ops = page_signal.get("content_ops")
-    if not isinstance(content_ops, list):
-        return []
-
-    path_ops = 0
-    stroke_ops = 0
-    fill_ops = 0
-    dash_ops = 0
-    thin_stroke_ops = 0
-    ocg_marked_content: set[str] = set()
-
-    prop_to_ocg_name = page_signal.get("prop_to_ocg_name")
-    ocg_map = prop_to_ocg_name if isinstance(prop_to_ocg_name, dict) else {}
-
-    for entry in content_ops:
-        if not isinstance(entry, dict):
-            continue
-        op = str(entry.get("op") or "").strip()
-        operands = entry.get("operands")
-        operands_list = operands if isinstance(operands, list) else []
-
-        if op in {"m", "l", "c", "v", "y", "re", "h"}:
-            path_ops += 1
-        elif op in {"S", "s"}:
-            stroke_ops += 1
-        elif op in {"f", "f*", "F", "B", "B*", "b", "b*"}:
-            fill_ops += 1
-        elif op == "d":
-            # Dashed strokes are a strong fold/crease indicator in packaging art.
-            if operands_list and isinstance(operands_list[0], list):
-                if any((_as_float(x) or 0.0) > 0.0 for x in operands_list[0]):
-                    dash_ops += 1
-        elif op == "w" and operands_list:
-            width = _as_float(operands_list[0])
-            if width is not None and width <= 1.0:
-                thin_stroke_ops += 1
-        elif op == "BDC" and len(operands_list) >= 2:
-            maybe_type = str(operands_list[0]).lstrip("/")
-            prop_name = str(operands_list[1]).lstrip("/")
-            if maybe_type == "OC":
-                mapped = ocg_map.get(prop_name)
-                if mapped and _DIELINE_PATTERN.search(str(mapped)):
-                    ocg_marked_content.add(str(mapped))
-
-    hits: list[tuple[str, float, list[str]]] = []
-    for name in sorted(ocg_marked_content):
-        hits.append(
-            (
-                f"{name} (page {page_num}, oc-marked)",
-                0.92,
-                ["analysis_ocg_marked_keyword"],
-            )
-        )
-
-    # Structural heuristics for files with missing spot/color semantics.
-    fold_like = dash_ops >= 2 and stroke_ops >= 4
-    dieline_like = (
-        stroke_ops >= 8
-        and path_ops >= 24
-        and fill_ops <= max(1, stroke_ops // 4)
-        and (thin_stroke_ops >= 2 or dash_ops >= 1)
-    )
-
-    if fold_like:
-        fold_reasons: list[str] = []
-        fold_confidence = 0.45
-        if dash_ops >= 2:
-            fold_reasons.append("analysis_dash_pattern")
-            fold_confidence += 0.2
-        if stroke_ops >= 4:
-            fold_reasons.append("analysis_stroke_dominant")
-            fold_confidence += 0.15
-        if thin_stroke_ops >= 1:
-            fold_reasons.append("analysis_thin_stroke")
-            fold_confidence += 0.1
-        hits.append(
-            (
-                f"foldline-like vector strokes (page {page_num})",
-                min(0.9, fold_confidence),
-                fold_reasons,
-            )
-        )
-    if dieline_like:
-        dieline_reasons: list[str] = []
-        dieline_confidence = 0.5
-        if path_ops >= 24:
-            dieline_reasons.append("analysis_dense_path_network")
-            dieline_confidence += 0.2
-        if stroke_ops >= 8:
-            dieline_reasons.append("analysis_stroke_dominant")
-            dieline_confidence += 0.15
-        if fill_ops <= max(1, stroke_ops // 4):
-            dieline_reasons.append("analysis_low_fill_ratio")
-            dieline_confidence += 0.1
-        if thin_stroke_ops >= 2:
-            dieline_reasons.append("analysis_thin_stroke")
-            dieline_confidence += 0.05
-        if dash_ops >= 1:
-            dieline_reasons.append("analysis_dash_pattern")
-            dieline_confidence += 0.05
-        hits.append(
-            (
-                f"dieline-like vector path network (page {page_num})",
-                min(0.95, dieline_confidence),
-                dieline_reasons,
-            )
-        )
-    return hits
 
 
 def _image_metrics(doc: CodexDocument) -> CodexSummaryImageMetrics:
@@ -420,5 +273,5 @@ def build_document_summary(doc: CodexDocument) -> CodexDocumentSummary:
             ),
         ),
         spot_colors=_spot_colors(doc),
-        dieline=_dieline_candidates(doc),
+        dieline=detect_dieline(doc),
     )

@@ -1531,6 +1531,158 @@
       "title": "CodexSummaryDielineCandidate",
       "type": "object"
     },
+    "CodexSummaryDielineSizeMetrics": {
+      "properties": {
+        "available": {
+          "default": false,
+          "title": "Available",
+          "type": "boolean"
+        },
+        "width_pt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width Pt"
+        },
+        "height_pt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height Pt"
+        },
+        "width_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width Mm"
+        },
+        "height_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height Mm"
+        },
+        "width_in": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width In"
+        },
+        "height_in": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height In"
+        },
+        "depth_pt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth Pt"
+        },
+        "depth_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth Mm"
+        },
+        "depth_in": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth In"
+        },
+        "depth_available": {
+          "default": false,
+          "title": "Depth Available",
+          "type": "boolean"
+        },
+        "depth_note": {
+          "default": "Unavailable from 2D PDF geometry",
+          "title": "Depth Note",
+          "type": "string"
+        },
+        "source": {
+          "default": "unavailable",
+          "enum": [
+            "analysis_stroke_bbox",
+            "unavailable"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "provenance": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Provenance",
+          "type": "array"
+        }
+      },
+      "title": "CodexSummaryDielineSizeMetrics",
+      "type": "object"
+    },
     "CodexSummaryDielineMetrics": {
       "properties": {
         "count": {
@@ -1568,6 +1720,14 @@
           ],
           "default": null,
           "title": "Trapped Flag"
+        },
+        "detector_version": {
+          "default": "canonical-v1",
+          "title": "Detector Version",
+          "type": "string"
+        },
+        "size": {
+          "$ref": "#/$defs/CodexSummaryDielineSizeMetrics"
         }
       },
       "title": "CodexSummaryDielineMetrics",
@@ -1747,11 +1907,28 @@
         "swatch_source": {
           "enum": [
             "rgb",
+            "icc_alternate",
             "cmyk",
+            "lab",
+            "pantone",
+            "curated",
+            "hash",
             "fallback"
           ],
           "title": "Swatch Source",
           "type": "string"
+        },
+        "swatch_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Swatch Note"
         },
         "rgb": {
           "anyOf": [

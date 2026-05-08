@@ -314,7 +314,17 @@ class CodexSummarySourceMetrics(BaseModel):
 class CodexSummarySpotColor(BaseModel):
     name: str
     swatch_hex: str
-    swatch_source: Literal["rgb", "cmyk", "fallback"]
+    swatch_source: Literal[
+        "rgb",
+        "icc_alternate",
+        "cmyk",
+        "lab",
+        "pantone",
+        "curated",
+        "hash",
+        "fallback",
+    ]
+    swatch_note: str | None = None
     rgb: tuple[int, int, int] | None = None
     cmyk: tuple[float, float, float, float] | None = None
     lab: tuple[float, float, float] | None = None
@@ -347,11 +357,31 @@ class CodexSummaryDielineCandidate(BaseModel):
     ] = Field(default_factory=list)
 
 
+class CodexSummaryDielineSizeMetrics(BaseModel):
+    available: bool = False
+    width_pt: float | None = None
+    height_pt: float | None = None
+    width_mm: float | None = None
+    height_mm: float | None = None
+    width_in: float | None = None
+    height_in: float | None = None
+    depth_pt: float | None = None
+    depth_mm: float | None = None
+    depth_in: float | None = None
+    depth_available: bool = False
+    depth_note: str = "Unavailable from 2D PDF geometry"
+    source: Literal["analysis_stroke_bbox", "unavailable"] = "unavailable"
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    provenance: list[str] = Field(default_factory=list)
+
+
 class CodexSummaryDielineMetrics(BaseModel):
     count: int = 0
     candidates: list[CodexSummaryDielineCandidate] = Field(default_factory=list)
     overall_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     trapped_flag: Literal["True", "False", "Unknown"] | None = None
+    detector_version: str = "canonical-v1"
+    size: CodexSummaryDielineSizeMetrics = Field(default_factory=CodexSummaryDielineSizeMetrics)
 
 
 class CodexDocumentSummary(BaseModel):
