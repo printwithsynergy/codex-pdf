@@ -188,6 +188,7 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     ghostscript: bool
+    cache_backend: str
 
 
 class VersionResponse(BaseModel):
@@ -254,7 +255,12 @@ async def healthz_root() -> HealthResponse:
 async def healthz() -> HealthResponse:
     from codex_pdf.render._common import has_ghostscript
 
-    return HealthResponse(status="ok", version=VERSION, ghostscript=has_ghostscript())
+    return HealthResponse(
+        status="ok",
+        version=VERSION,
+        ghostscript=has_ghostscript(),
+        cache_backend=getattr(_cache, "name", type(_cache).__name__.lower()),
+    )
 
 
 @app.get("/v1/version", response_model=VersionResponse)

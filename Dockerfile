@@ -43,7 +43,11 @@ COPY tests ./tests
 # container start tries to repair the editable install and fails on
 # `/opt/venv/.../bin/codex-pdf: Permission denied` because the bin
 # entries land outside the dir tree the runtime user can write.
-RUN uv sync --frozen --no-dev \
+# Install the `redis` extra unconditionally so a deploy that wires
+# CODEX_REDIS_URL to a Railway Redis service uses the shared cache,
+# AND a deploy that deletes the redis service still boots cleanly
+# (codex falls back to in-memory; see codex_pdf.api.cache.make_cache).
+RUN uv sync --frozen --no-dev --extra redis \
  && chown -R codex:codex /opt/venv /app
 
 USER codex

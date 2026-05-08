@@ -2,9 +2,13 @@
 
 Content-addressed by ``sha256(pdf) + sha256(args_json)``. Pluggable:
 
-- ``memory`` (default) — in-process LRU.
-- ``redis`` — set ``CODEX_REDIS_URL=redis://...``.
-- ``s3`` — set ``CODEX_S3_BUCKET`` (uses default AWS creds chain).
+- ``memory`` (default) — in-process LRU. Always works, no deps.
+- ``redis`` — set ``CODEX_REDIS_URL=redis://...``. **Optional**: any
+  failure to import ``redis``, parse the URL, connect, or PING is
+  logged and the service falls back to the in-memory cache. Redis
+  must never crash the codex API at boot or at request time.
+- ``s3`` — placeholder; not wired here. Front the API with a CDN /
+  object-store cache instead.
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ def cache_key(pdf_bytes: bytes, args: dict[str, Any], *, kind: str) -> str:
 class MemoryCache:
     """Simple LRU. ``maxsize`` defaults to 256 entries."""
 
+    name = "memory"
+
     def __init__(self, maxsize: int = 256) -> None:
         self._maxsize = maxsize
         self._store: OrderedDict[str, bytes] = OrderedDict()
@@ -55,45 +61,100 @@ class MemoryCache:
 
 
 class RedisCache:
-    """Thin wrapper over redis-py. Imported lazily."""
+    """Thin wrapper over redis-py. Imported lazily.
+
+    Constructor performs a single ``PING`` at init time so a bogus URL
+    or unreachable Redis service surfaces as a startup-time
+    ``RuntimeError`` (caught by :func:`make_cache` and downgraded to
+    a logged warning). Once initialised, transient ``get``/``set``
+    failures are logged and treated as cache misses — they never
+    propagate to the API request handler.
+    """
+
+    name = "redis"
 
     def __init__(self, url: str, ttl_seconds: int = 86400) -> None:
         try:
             import redis  # type: ignore
-        except ImportError as exc:  # pragma: no cover
+        except ImportError as exc:
             raise RuntimeError(
-                "CODEX_REDIS_URL set but 'redis' Python package not installed. "
-                "Add 'redis' to your environment."
+                "CODEX_REDIS_URL set but the 'redis' Python package is not installed. "
+                "Install codex-pdf with the 'redis' extra, or unset CODEX_REDIS_URL "
+                "to use the in-memory cache."
             ) from exc
-        self._client = redis.Redis.from_url(url)
+
+        try:
+            self._client = redis.Redis.from_url(url, socket_connect_timeout=2.0, socket_timeout=2.0)
+        except Exception as exc:
+            raise RuntimeError(f"failed to parse CODEX_REDIS_URL: {exc}") from exc
+
+        try:
+            pong = self._client.ping()
+        except Exception as exc:
+            raise RuntimeError(f"Redis PING failed for {url!r}: {exc}") from exc
+        if not pong:
+            raise RuntimeError(f"Redis at {url!r} did not return PONG")
+
         self._ttl = ttl_seconds
 
     def get(self, key: str) -> bytes | None:
         try:
             return self._client.get(key)
         except Exception:
-            logger.exception("RedisCache.get failed for %s", key)
+            logger.warning("RedisCache.get failed for %s; treating as miss", key, exc_info=True)
             return None
 
     def set(self, key: str, value: bytes) -> None:
         try:
             self._client.set(key, value, ex=self._ttl)
         except Exception:
-            logger.exception("RedisCache.set failed for %s", key)
+            logger.warning("RedisCache.set failed for %s; cache write skipped", key, exc_info=True)
 
 
 def make_cache():
     """Pick the cache backend based on environment.
 
-    Order: ``CODEX_REDIS_URL`` → ``RedisCache``; otherwise ``MemoryCache``.
-    S3 is intentionally not wired here yet — sites that need S3 should
-    front the API with a CDN/object-store cache instead of mixing it
-    into the API request path.
+    Order of preference:
+
+    1. ``CODEX_REDIS_URL`` set + non-empty + reachable → ``RedisCache``
+    2. Anything else (URL missing, empty, unreachable, malformed) →
+       ``MemoryCache`` with a logged warning so operators can spot the
+       fallback in deploy logs.
+
+    This function MUST NOT raise. The codex API treats the cache as a
+    soft dependency: even if every backend is misconfigured the
+    service must still come up and serve requests (cache misses on
+    every call, but functional).
     """
-    redis_url = os.environ.get("CODEX_REDIS_URL")
-    if redis_url:
-        try:
-            return RedisCache(redis_url)
-        except Exception:
-            logger.exception("Falling back to MemoryCache; RedisCache init failed")
-    return MemoryCache()
+    redis_url = (os.environ.get("CODEX_REDIS_URL") or "").strip()
+    if not redis_url:
+        logger.info("codex cache: in-memory (CODEX_REDIS_URL unset)")
+        return MemoryCache()
+    try:
+        cache = RedisCache(redis_url)
+        logger.info("codex cache: redis (%s)", _mask_url(redis_url))
+        return cache
+    except Exception as exc:
+        logger.warning(
+            "codex cache: Redis init failed (%s); falling back to in-memory cache. "
+            "This is safe but cold-cache CPU is higher. Fix CODEX_REDIS_URL or "
+            "delete the redis service to silence this warning.",
+            exc,
+        )
+        return MemoryCache()
+
+
+def _mask_url(url: str) -> str:
+    """Strip credentials from a Redis URL before logging it."""
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(url)
+        if parsed.password or parsed.username:
+            netloc = parsed.hostname or ""
+            if parsed.port:
+                netloc = f"{netloc}:{parsed.port}"
+            return urlunparse(parsed._replace(netloc=netloc))
+        return url
+    except Exception:
+        return "<redacted>"
