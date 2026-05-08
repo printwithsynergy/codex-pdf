@@ -1,0 +1,19 @@
+pyproject.toml
+  s_1cf4e1656d4052::t_dd734d84cf11db 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "8777f683709aa28e71c347c2eb1d3d18416aad91",
+  "prompts": {},
+  "sessions": {
+    "s_1cf4e1656d4052": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "6b6dd342-df77-4bf1-bb1c-2b72518f42db",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
