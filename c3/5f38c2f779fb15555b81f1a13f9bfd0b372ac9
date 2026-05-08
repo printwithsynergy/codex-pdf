@@ -1,0 +1,79 @@
+src/codex_pdf/color/curated.py
+  s_f2a9cf6cf331fd::t_df83e47233e3d3 1-67
+src/codex_pdf/api/main.py
+  s_f2a9cf6cf331fd::t_efcb8581ac2a3b 226-342
+  s_f2a9cf6cf331fd::t_09400ec7a096c3 60-70,72-82
+  s_f2a9cf6cf331fd::t_a5363fd0487f85 427-433,440-443
+  s_f2a9cf6cf331fd::t_f9ce53ce8839a9 958-1409
+src/codex_pdf/color/resolver.py
+  s_f2a9cf6cf331fd::t_50fd42cb4a0059 1-300
+clients/ts/src/index.ts
+  s_f2a9cf6cf331fd::t_60240d337d4f6a 608-709
+  s_f2a9cf6cf331fd::t_c72acc0f9d8472 112-250
+  s_f2a9cf6cf331fd::t_dd4b6f5b895817 18-27
+src/codex_pdf/version.py
+  s_f2a9cf6cf331fd::t_bbb4a6b6bde10d 3-10,12-28,30-38,41
+src/codex_pdf/color/normalize.py
+  s_f2a9cf6cf331fd::t_4ccc032ca40536 1-70
+clients/ts/package.json
+  s_f2a9cf6cf331fd::t_5c4d3a24809718 3
+src/codex_pdf/geom/__init__.py
+  s_f2a9cf6cf331fd::t_ba5f1b16e2544e 1-84
+src/codex_pdf/color/color_math.py
+  s_f2a9cf6cf331fd::t_d9cc7123758d04 1-220
+src/codex_pdf/geom/matrix.py
+  s_f2a9cf6cf331fd::t_c6b733d844d7bd 1-131
+clients/ts/src/color.ts
+  s_f2a9cf6cf331fd::t_bdfb6e413e9644 1-176
+clients/ts/src/index.test.ts
+  s_f2a9cf6cf331fd::t_eae8125a83a923 75-137
+  s_f2a9cf6cf331fd::t_b18bc3dc142a7a 3-10
+pyproject.toml
+  s_f2a9cf6cf331fd::t_18fd98bc41b7f0 7
+  s_f2a9cf6cf331fd::t_49b41e8c8e08d7 37-39
+  s_f2a9cf6cf331fd::t_8d1426b0fba5bb 27-29
+src/codex_pdf/color/__init__.py
+  s_f2a9cf6cf331fd::t_b611d9f94a3ae1 1-136
+.github/workflows/ci.yml
+  s_f2a9cf6cf331fd::t_4ead2403b98dab 16,19-21
+src/codex_pdf/geom/box.py
+  s_f2a9cf6cf331fd::t_d48fec2f2c98e8 1-170
+Dockerfile
+  s_f2a9cf6cf331fd::t_731fd029773f95 50
+src/codex_pdf/geom/tile.py
+  s_f2a9cf6cf331fd::t_11bc7b24a1967b 1-163
+tests/test_geom.py
+  s_f2a9cf6cf331fd::t_e8d91ef1f0dc62 1-184,189-267
+  s_f2a9cf6cf331fd::t_fae2f98d40b8e8 185-188
+src/codex_pdf/color/pantone.py
+  s_f2a9cf6cf331fd::t_df0fd87e5dc697 1-265
+tests/test_produce_surface_audit.py
+  s_f2a9cf6cf331fd::t_33cef47c28be22 1-163
+src/codex_pdf/geom/units.py
+  s_f2a9cf6cf331fd::t_6b32319eae3d13 1-48
+scripts/produce_surface_audit.py
+  s_f2a9cf6cf331fd::t_0eda92f1be8495 141-150
+  s_f2a9cf6cf331fd::t_f3febf838d7363 1-140,151-360,368-373,375-383,385-430
+  s_f2a9cf6cf331fd::t_c47012a055619f 361-367,374,384
+tests/test_color.py
+  s_f2a9cf6cf331fd::t_1be03704b25321 1-303
+src/codex_pdf/geom/path.py
+  s_f2a9cf6cf331fd::t_03cac3918ae5c8 1-165,167-168,170,174,176-214
+  s_f2a9cf6cf331fd::t_39246e23871a4c 166,169,171-173,175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "c35f38c2f779fb15555b81f1a13f9bfd0b372ac9",
+  "prompts": {},
+  "sessions": {
+    "s_f2a9cf6cf331fd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d3d46a94-285b-4b65-a130-25e630f5d99d",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
