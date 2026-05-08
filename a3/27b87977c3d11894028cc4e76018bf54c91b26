@@ -1,0 +1,19 @@
+clients/ts/src/index.ts
+  s_8d898e9cb8f286::t_a1fbd531244cc4 307,561-565
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "a327b87977c3d11894028cc4e76018bf54c91b26",
+  "prompts": {},
+  "sessions": {
+    "s_8d898e9cb8f286": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b4090aa5-ff59-4cf9-90d6-2451d0d6108f",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
