@@ -274,6 +274,81 @@ class CodexPage(BaseModel):
     analysis: dict[str, Any] = Field(default_factory=dict)
 
 
+class CodexSummaryCountMetrics(BaseModel):
+    pages: int = 0
+    images: int = 0
+    fonts: int = 0
+    embedded_fonts: int = 0
+    referenced_fonts: int = 0
+    fonts_with_missing_glyphs: int = 0
+
+
+class CodexSummaryImageMetrics(BaseModel):
+    dpi_avg: float | None = None
+    dpi_min: float | None = None
+    below_300_dpi: int = 0
+    largest_width_px: int | None = None
+    largest_height_px: int | None = None
+    largest_area_px2: int | None = None
+
+
+class CodexSummaryPageSize(BaseModel):
+    width_in: float
+    height_in: float
+    width_mm: float
+    height_mm: float
+
+
+class CodexSummaryPageMetrics(BaseModel):
+    first_page: CodexSummaryPageSize | None = None
+    total_area_sq_in: float = 0.0
+    total_area_sq_ft: float = 0.0
+    total_area_sq_mm: float = 0.0
+
+
+class CodexSummarySourceMetrics(BaseModel):
+    size_bytes: int | None = None
+    size_mb: float | None = None
+
+
+class CodexSummarySpotColor(BaseModel):
+    name: str
+    swatch_hex: str
+    swatch_source: Literal["rgb", "cmyk", "fallback"]
+    rgb: tuple[int, int, int] | None = None
+    cmyk: tuple[float, float, float, float] | None = None
+    lab: tuple[float, float, float] | None = None
+    pantone_name: str | None = None
+
+
+class CodexSummarySpotColorMetrics(BaseModel):
+    count: int = 0
+    colors: list[CodexSummarySpotColor] = Field(default_factory=list)
+
+
+class CodexSummaryDielineCandidate(BaseModel):
+    name: str
+    source: Literal["ocg_name", "ocg_processing_step", "trap_layer"]
+    ocg_id: str | None = None
+    processing_step: str | None = None
+
+
+class CodexSummaryDielineMetrics(BaseModel):
+    count: int = 0
+    candidates: list[CodexSummaryDielineCandidate] = Field(default_factory=list)
+    trapped_flag: Literal["True", "False", "Unknown"] | None = None
+
+
+class CodexDocumentSummary(BaseModel):
+    version: str = "1.0"
+    counts: CodexSummaryCountMetrics = Field(default_factory=CodexSummaryCountMetrics)
+    images: CodexSummaryImageMetrics = Field(default_factory=CodexSummaryImageMetrics)
+    pages: CodexSummaryPageMetrics = Field(default_factory=CodexSummaryPageMetrics)
+    source: CodexSummarySourceMetrics = Field(default_factory=CodexSummarySourceMetrics)
+    spot_colors: CodexSummarySpotColorMetrics = Field(default_factory=CodexSummarySpotColorMetrics)
+    dieline: CodexSummaryDielineMetrics = Field(default_factory=CodexSummaryDielineMetrics)
+
+
 class CodexDocument(BaseModel):
     schema_version: str = "1.0.0"
     codex_version: str
@@ -296,5 +371,6 @@ class CodexDocument(BaseModel):
     trap_evidence: CodexTrapEvidence = Field(default_factory=CodexTrapEvidence)
     annotations: list[CodexAnnotation] = Field(default_factory=list)
     analysis: dict[str, Any] = Field(default_factory=dict)
+    summary: CodexDocumentSummary | None = None
     preflight_reports: list[CodexPreflightReport] = Field(default_factory=list)
     extraction_warnings: list[CodexWarning] = Field(default_factory=list)

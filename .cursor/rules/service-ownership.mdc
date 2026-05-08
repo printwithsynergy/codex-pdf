@@ -1,0 +1,12 @@
+---
+description: Service ownership boundary for Loupe/Lint/Codex and future offshoots
+alwaysApply: true
+---
+
+# Service Ownership Boundary
+
+- **Codex owns** extraction, normalization, and reusable summary/detection payloads.
+- **Lint owns** policy rules, reporting semantics, and preflight workflow orchestration.
+- **Loupe owns** rendering, visual inspection UI, and display interactions.
+- Keep Codex rule-agnostic; never hardcode customer pass/fail policy in this repo.
+- For offshoots (Forge, Trap, Impose, Marks, etc.), map each feature to one owner layer and integrate by contract, not duplicated logic.

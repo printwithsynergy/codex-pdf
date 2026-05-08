@@ -19,6 +19,7 @@ from codex_pdf.extract.structure import (
     conformance_claims_from_metadata,
     extract_structure_fitz,
 )
+from codex_pdf.extract.summary import build_document_summary
 from codex_pdf.extract.trapping import derive_trapped_flag, extract_trap_evidence
 from codex_pdf.extract.transparency import extract_transparency_fitz
 
@@ -73,7 +74,7 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
         annotation_subtypes=[x.subtype or "" for x in annotations],
     )
 
-    return CodexDocument(
+    doc = CodexDocument(
         codex_version=__version__,
         document_id=digest,
         source=CodexSourceRef(uri=source_uri, sha256=digest, size_bytes=len(pdf_bytes)),
@@ -94,6 +95,8 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
         annotations=annotations,
         pages=pages,
     )
+    doc.summary = build_document_summary(doc)
+    return doc
 
 
 def extract_from_path(path: Path) -> CodexDocument:
