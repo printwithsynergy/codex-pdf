@@ -18,20 +18,16 @@ def extract_analysis_signals_pikepdf(pdf_bytes: bytes) -> dict[str, Any]:
         with pikepdf.open(BytesIO(pdf_bytes)) as pdf:
             out["spot_names"] = _collect_spot_names(pdf)
             out["layer_names"] = _collect_layer_names(pdf)
-            page_signals = _extract_page_one_signals(pdf)
-            if page_signals:
-                out["page_1"] = page_signals
+            for idx, page in enumerate(pdf.pages, start=1):
+                page_signals = _extract_page_signals(page)
+                if page_signals:
+                    out[f"page_{idx}"] = page_signals
     except Exception:
         return {}
     return out
 
 
-def _extract_page_one_signals(pdf: Any) -> dict[str, Any]:
-    try:
-        page = pdf.pages[0]
-    except Exception:
-        return {}
-
+def _extract_page_signals(page: Any) -> dict[str, Any]:
     resources = page.get("/Resources") if hasattr(page, "get") else None
     cs_dict = resources.get("/ColorSpace") if resources and hasattr(resources, "get") else None
     props_dict = resources.get("/Properties") if resources and hasattr(resources, "get") else None

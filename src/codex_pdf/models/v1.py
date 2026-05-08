@@ -328,14 +328,29 @@ class CodexSummarySpotColorMetrics(BaseModel):
 
 class CodexSummaryDielineCandidate(BaseModel):
     name: str
-    source: Literal["ocg_name", "ocg_processing_step", "trap_layer"]
+    source: Literal["ocg_name", "ocg_processing_step", "trap_layer", "analysis_signal"]
     ocg_id: str | None = None
     processing_step: str | None = None
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    reason_codes: list[
+        Literal[
+            "name_keyword",
+            "iso19593_processing_step",
+            "trap_layer_keyword",
+            "analysis_ocg_marked_keyword",
+            "analysis_dash_pattern",
+            "analysis_thin_stroke",
+            "analysis_stroke_dominant",
+            "analysis_dense_path_network",
+            "analysis_low_fill_ratio",
+        ]
+    ] = Field(default_factory=list)
 
 
 class CodexSummaryDielineMetrics(BaseModel):
     count: int = 0
     candidates: list[CodexSummaryDielineCandidate] = Field(default_factory=list)
+    overall_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     trapped_flag: Literal["True", "False", "Unknown"] | None = None
 
 

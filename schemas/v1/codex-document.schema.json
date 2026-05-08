@@ -1468,7 +1468,8 @@
           "enum": [
             "ocg_name",
             "ocg_processing_step",
-            "trap_layer"
+            "trap_layer",
+            "analysis_signal"
           ],
           "title": "Source",
           "type": "string"
@@ -1496,6 +1497,31 @@
           ],
           "default": null,
           "title": "Processing Step"
+        },
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "reason_codes": {
+          "items": {
+            "enum": [
+              "name_keyword",
+              "iso19593_processing_step",
+              "trap_layer_keyword",
+              "analysis_ocg_marked_keyword",
+              "analysis_dash_pattern",
+              "analysis_thin_stroke",
+              "analysis_stroke_dominant",
+              "analysis_dense_path_network",
+              "analysis_low_fill_ratio"
+            ],
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
         }
       },
       "required": [
@@ -1518,6 +1544,13 @@
           },
           "title": "Candidates",
           "type": "array"
+        },
+        "overall_confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Overall Confidence",
+          "type": "number"
         },
         "trapped_flag": {
           "anyOf": [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from codex_pdf.models.v1 import (
     CodexDocument,
@@ -104,6 +105,8 @@ def _dieline_candidates(doc: CodexDocument) -> CodexSummaryDielineMetrics:
         source: str,
         ocg_id: str | None = None,
         processing_step: str | None = None,
+        confidence: float = 0.5,
+        reason_codes: list[str] | None = None,
     ) -> None:
         trimmed = name.strip()
         if not trimmed:
@@ -118,12 +121,20 @@ def _dieline_candidates(doc: CodexDocument) -> CodexSummaryDielineMetrics:
                 source=source,  # type: ignore[arg-type]
                 ocg_id=ocg_id,
                 processing_step=processing_step,
+                confidence=max(0.0, min(1.0, confidence)),
+                reason_codes=sorted(set(reason_codes or [])),  # type: ignore[arg-type]
             )
         )
 
     for ocg in doc.ocgs:
         if _DIELINE_PATTERN.search(ocg.name):
-            _add(name=ocg.name, source="ocg_name", ocg_id=ocg.ocg_id)
+            _add(
+                name=ocg.name,
+                source="ocg_name",
+                ocg_id=ocg.ocg_id,
+                confidence=0.95,
+                reason_codes=["name_keyword"],
+            )
         if ocg.iso19593_processing_step and _DIELINE_PATTERN.search(
             ocg.iso19593_processing_step
         ):
@@ -132,6 +143,8 @@ def _dieline_candidates(doc: CodexDocument) -> CodexSummaryDielineMetrics:
                 source="ocg_processing_step",
                 ocg_id=ocg.ocg_id,
                 processing_step=ocg.iso19593_processing_step,
+                confidence=0.98,
+                reason_codes=["iso19593_processing_step"],
             )
 
     for layer in doc.trap_evidence.trap_layers:
@@ -142,13 +155,163 @@ def _dieline_candidates(doc: CodexDocument) -> CodexSummaryDielineMetrics:
                 source="trap_layer",
                 ocg_id=layer.ocg_id,
                 processing_step=layer.processing_step,
+                confidence=0.9,
+                reason_codes=["trap_layer_keyword"],
+            )
+
+    for page_num, page_signal in _iter_page_signals(doc.analysis):
+        signal_hits = _dieline_signal_candidates(page_num, page_signal)
+        for hit_name, hit_confidence, hit_reasons in signal_hits:
+            _add(
+                name=hit_name,
+                source="analysis_signal",
+                confidence=hit_confidence,
+                reason_codes=hit_reasons,
             )
 
     return CodexSummaryDielineMetrics(
         count=len(candidates),
         candidates=candidates,
+        overall_confidence=max((c.confidence for c in candidates), default=0.0),
         trapped_flag=doc.trapped_flag,
     )
+
+
+def _iter_page_signals(analysis: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    out: list[tuple[int, dict[str, Any]]] = []
+    for key, value in analysis.items():
+        if not isinstance(value, dict):
+            continue
+        if key.startswith("page_"):
+            suffix = key.removeprefix("page_")
+            if suffix.isdigit():
+                out.append((int(suffix), value))
+    return sorted(out, key=lambda item: item[0])
+
+
+def _as_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _dieline_signal_candidates(
+    page_num: int,
+    page_signal: dict[str, Any],
+) -> list[tuple[str, float, list[str]]]:
+    content_ops = page_signal.get("content_ops")
+    if not isinstance(content_ops, list):
+        return []
+
+    path_ops = 0
+    stroke_ops = 0
+    fill_ops = 0
+    dash_ops = 0
+    thin_stroke_ops = 0
+    ocg_marked_content: set[str] = set()
+
+    prop_to_ocg_name = page_signal.get("prop_to_ocg_name")
+    ocg_map = prop_to_ocg_name if isinstance(prop_to_ocg_name, dict) else {}
+
+    for entry in content_ops:
+        if not isinstance(entry, dict):
+            continue
+        op = str(entry.get("op") or "").strip()
+        operands = entry.get("operands")
+        operands_list = operands if isinstance(operands, list) else []
+
+        if op in {"m", "l", "c", "v", "y", "re", "h"}:
+            path_ops += 1
+        elif op in {"S", "s"}:
+            stroke_ops += 1
+        elif op in {"f", "f*", "F", "B", "B*", "b", "b*"}:
+            fill_ops += 1
+        elif op == "d":
+            # Dashed strokes are a strong fold/crease indicator in packaging art.
+            if operands_list and isinstance(operands_list[0], list):
+                if any((_as_float(x) or 0.0) > 0.0 for x in operands_list[0]):
+                    dash_ops += 1
+        elif op == "w" and operands_list:
+            width = _as_float(operands_list[0])
+            if width is not None and width <= 1.0:
+                thin_stroke_ops += 1
+        elif op == "BDC" and len(operands_list) >= 2:
+            maybe_type = str(operands_list[0]).lstrip("/")
+            prop_name = str(operands_list[1]).lstrip("/")
+            if maybe_type == "OC":
+                mapped = ocg_map.get(prop_name)
+                if mapped and _DIELINE_PATTERN.search(str(mapped)):
+                    ocg_marked_content.add(str(mapped))
+
+    hits: list[tuple[str, float, list[str]]] = []
+    for name in sorted(ocg_marked_content):
+        hits.append(
+            (
+                f"{name} (page {page_num}, oc-marked)",
+                0.92,
+                ["analysis_ocg_marked_keyword"],
+            )
+        )
+
+    # Structural heuristics for files with missing spot/color semantics.
+    fold_like = dash_ops >= 2 and stroke_ops >= 4
+    dieline_like = (
+        stroke_ops >= 8
+        and path_ops >= 24
+        and fill_ops <= max(1, stroke_ops // 4)
+        and (thin_stroke_ops >= 2 or dash_ops >= 1)
+    )
+
+    if fold_like:
+        fold_reasons: list[str] = []
+        fold_confidence = 0.45
+        if dash_ops >= 2:
+            fold_reasons.append("analysis_dash_pattern")
+            fold_confidence += 0.2
+        if stroke_ops >= 4:
+            fold_reasons.append("analysis_stroke_dominant")
+            fold_confidence += 0.15
+        if thin_stroke_ops >= 1:
+            fold_reasons.append("analysis_thin_stroke")
+            fold_confidence += 0.1
+        hits.append(
+            (
+                f"foldline-like vector strokes (page {page_num})",
+                min(0.9, fold_confidence),
+                fold_reasons,
+            )
+        )
+    if dieline_like:
+        dieline_reasons: list[str] = []
+        dieline_confidence = 0.5
+        if path_ops >= 24:
+            dieline_reasons.append("analysis_dense_path_network")
+            dieline_confidence += 0.2
+        if stroke_ops >= 8:
+            dieline_reasons.append("analysis_stroke_dominant")
+            dieline_confidence += 0.15
+        if fill_ops <= max(1, stroke_ops // 4):
+            dieline_reasons.append("analysis_low_fill_ratio")
+            dieline_confidence += 0.1
+        if thin_stroke_ops >= 2:
+            dieline_reasons.append("analysis_thin_stroke")
+            dieline_confidence += 0.05
+        if dash_ops >= 1:
+            dieline_reasons.append("analysis_dash_pattern")
+            dieline_confidence += 0.05
+        hits.append(
+            (
+                f"dieline-like vector path network (page {page_num})",
+                min(0.95, dieline_confidence),
+                dieline_reasons,
+            )
+        )
+    return hits
 
 
 def _image_metrics(doc: CodexDocument) -> CodexSummaryImageMetrics:
