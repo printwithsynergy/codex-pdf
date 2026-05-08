@@ -304,7 +304,7 @@ export class HttpClient {
       );
     }
     this.targets = targets;
-    this.baseUrl = targets[0].baseUrl;
+    this.baseUrl = targets[0]!.baseUrl;
     this.plant = opts.plant ?? envVar("CODEX_PLANT") ?? undefined;
     this.routeMode =
       opts.routeMode ??
@@ -558,7 +558,11 @@ export class HttpClient {
         if (item.includes("=")) {
           const [plant, raw] = item.split("=", 2);
           if (raw?.trim()) {
-            targets.push({ baseUrl: raw.trim().replace(/\/+$/, ""), plant: plant.trim() || undefined });
+            const plantName = (plant ?? "").trim();
+            targets.push({
+              baseUrl: raw.trim().replace(/\/+$/, ""),
+              plant: plantName || undefined,
+            });
           }
         } else {
           targets.push({ baseUrl: item.replace(/\/+$/, "") });
