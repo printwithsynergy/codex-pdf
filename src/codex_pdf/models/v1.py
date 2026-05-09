@@ -72,6 +72,10 @@ class CodexSpotColorant(BaseModel):
     viewer) can resolve intent-accurate swatches without falling back
     to hash-of-name pseudo-random hues. Extractors are free to leave
     them ``None`` — additive fields, no breaking change.
+
+    ``neutral_density`` (§16.1) is the optical density of the colorant
+    measured at 0% tint on the paper substrate; ``neutral_density_source``
+    records how it was determined.
     """
 
     name: str
@@ -81,6 +85,8 @@ class CodexSpotColorant(BaseModel):
     cmyk: tuple[float, float, float, float] | None = None
     rgb: tuple[float, float, float] | None = None
     pantone_name: str | None = None
+    neutral_density: float | None = None
+    neutral_density_source: Literal["measured", "computed_from_lab", "estimated"] | None = None
 
 
 class CodexColorSpace(BaseModel):
@@ -395,12 +401,13 @@ class CodexDocumentSummary(BaseModel):
 
 
 class CodexDocument(BaseModel):
-    schema_version: str = "1.0.0"
+    schema_version: str = "1.1.0"
     codex_version: str
     document_id: str
     source: CodexSourceRef
     pdf_version: str = "unknown"
     is_encrypted: bool = False
+    is_linearized: bool = False
     conformance: CodexConformanceClaims = Field(default_factory=CodexConformanceClaims)
     info: CodexInfoDict | None = None
     xmp: CodexXmpPacket | None = None

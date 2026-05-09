@@ -13,7 +13,8 @@ demos without round-tripping through Forge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from codex_pdf.geom.box import Box
 
@@ -35,7 +36,12 @@ class MarksZone:
 
 @dataclass(frozen=True)
 class TileGrid:
-    """Tile-grid input parameters."""
+    """Tile-grid input parameters.
+
+    §16.2 additions: cell_rotation, cell_rotation_pattern, flip_per_row,
+    flip_pattern, bleed_handling, bleed are all optional and default to no-op
+    values. Existing code that constructs TileGrid positionally is unaffected.
+    """
 
     sheet: Box
     cell_width: float
@@ -44,14 +50,57 @@ class TileGrid:
     gutter_y: float = 0.0
     marks_zone: MarksZone = MarksZone()
     origin: str = "bottom-left"
+    # §16.2 extension fields — all optional, backward-compatible defaults
+    cell_rotation: float = 0.0
+    cell_rotation_pattern: tuple[tuple[float, ...], ...] | None = None
+    flip_per_row: bool = False
+    flip_pattern: tuple[tuple[bool, ...], ...] | None = None
+    bleed_handling: Literal["none", "trim", "extend"] = "none"
+    bleed: float = 0.0
+
+
+@dataclass(frozen=True)
+class CellPlacement:
+    """A single tile cell with its box and §16.2 placement attributes.
+
+    Provides ``x0``/``y0``/``x1``/``y1`` properties forwarding to ``box``
+    for backward compatibility with code that treated cells as plain Boxes.
+    """
+
+    box: Box
+    rotation: float = 0.0
+    flip_h: bool = False
+    flip_v: bool = False
+    row: int = 0
+    col: int = 0
+
+    @property
+    def x0(self) -> float:
+        return self.box.x0
+
+    @property
+    def y0(self) -> float:
+        return self.box.y0
+
+    @property
+    def x1(self) -> float:
+        return self.box.x1
+
+    @property
+    def y1(self) -> float:
+        return self.box.y1
 
 
 @dataclass(frozen=True)
 class TileResult:
-    """Computed tile-grid layout."""
+    """Computed tile-grid layout.
+
+    ``cells`` is now ``tuple[CellPlacement, ...]``; each placement exposes
+    ``x0``/``y0``/``x1``/``y1`` forwarding properties for backward compat.
+    """
 
     sheet: Box
-    cells: tuple[Box, ...]
+    cells: tuple[CellPlacement, ...]
     rows: int
     cols: int
     used: Box
@@ -119,7 +168,7 @@ def tile_grid(grid: TileGrid) -> TileResult:
     used_w = cols * grid.cell_width + max(0, cols - 1) * grid.gutter_x
     used_h = rows * grid.cell_height + max(0, rows - 1) * grid.gutter_y
 
-    cells: list[Box] = []
+    cells: list[CellPlacement] = []
     for row in range(rows):
         for col in range(cols):
             x0 = inner.x0 + col * (grid.cell_width + grid.gutter_x)
@@ -127,14 +176,28 @@ def tile_grid(grid: TileGrid) -> TileResult:
                 y0 = inner.y0 + row * (grid.cell_height + grid.gutter_y)
             else:
                 y0 = inner.y1 - (row + 1) * grid.cell_height - row * grid.gutter_y
-            cells.append(
-                Box.from_bounds(
-                    x0,
-                    y0,
-                    x0 + grid.cell_width,
-                    y0 + grid.cell_height,
-                )
-            )
+            box = Box.from_bounds(x0, y0, x0 + grid.cell_width, y0 + grid.cell_height)
+
+            # §16.2: per-cell rotation from pattern or uniform value
+            if grid.cell_rotation_pattern is not None:
+                pat_row = grid.cell_rotation_pattern[row % len(grid.cell_rotation_pattern)]
+                rotation = pat_row[col % len(pat_row)]
+            else:
+                rotation = grid.cell_rotation
+
+            # §16.2: per-cell flip from pattern or flip_per_row alternation
+            if grid.flip_pattern is not None:
+                fp_row = grid.flip_pattern[row % len(grid.flip_pattern)]
+                flip_h = fp_row[col % len(fp_row)]
+                flip_v = False
+            elif grid.flip_per_row:
+                flip_h = (row % 2 == 1)
+                flip_v = False
+            else:
+                flip_h = False
+                flip_v = False
+
+            cells.append(CellPlacement(box=box, rotation=rotation, flip_h=flip_h, flip_v=flip_v, row=row, col=col))
 
     used = Box.from_bounds(
         inner.x0,
@@ -160,4 +223,4 @@ def tile_grid(grid: TileGrid) -> TileResult:
         gutter_x=grid.gutter_x,
         gutter_y=grid.gutter_y,
         marks_zone=grid.marks_zone,
-    )
+    )  # type: ignore[arg-type]

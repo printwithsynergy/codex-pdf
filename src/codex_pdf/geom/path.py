@@ -212,3 +212,83 @@ def _polygon_corners(box: Box) -> tuple[Point, Point, Point, Point]:
         (box.x1, box.y1),
         (box.x0, box.y1),
     )
+
+
+_SCALE = 1_000  # pyclipr integer scale factor for offset operations
+
+
+def polygon_offset(
+    path: Path,
+    distance: float,
+    *,
+    join_type: str = "miter",
+    end_type: str = "polygon",
+    miter_limit: float = 2.0,
+) -> Path:
+    """Inflate or deflate a polygon path by ``distance`` PDF points (§16.2).
+
+    Positive ``distance`` expands (spreads) the path; negative shrinks (chokes).
+
+    ``join_type`` controls corners: ``"miter"`` (default), ``"round"``, ``"square"``.
+    ``end_type`` controls open paths: ``"polygon"`` (default, closed), ``"openRound"``,
+    ``"openButt"``, ``"openSquare"``.
+
+    Requires the optional ``pyclipr`` dependency (``pip install codex-pdf[geom]``).
+    Falls back to a simple bounding-box expansion for pure-rectangle paths when
+    pyclipr is unavailable and ``join_type == "miter"``.
+    """
+    if not path.rings:
+        return path
+
+    # Axis-aligned rectangle fast-path when pyclipr unavailable.
+    if not HAS_PYCLIPR:
+        rects = [_try_as_box(ring) for ring in path.rings]
+        if all(b is not None for b in rects):
+            expanded = [
+                Box(b.x0 - distance, b.y0 - distance, b.x1 + distance, b.y1 + distance)
+                for b in rects  # type: ignore[union-attr]
+            ]
+            return Path.from_polygons([list(_polygon_corners(b)) for b in expanded if not b.empty])
+        raise RuntimeError(
+            "polygon_offset on non-rectangular paths requires the optional 'pyclipr' "
+            "dependency; install codex-pdf with the [geom] extra."
+        )
+
+    join_map = {
+        "miter": pyclipr.JoinType.Miter,  # type: ignore[union-attr]
+        "round": pyclipr.JoinType.Round,  # type: ignore[union-attr]
+        "square": pyclipr.JoinType.Square,  # type: ignore[union-attr]
+    }
+    end_map = {
+        "polygon": pyclipr.EndType.Polygon,  # type: ignore[union-attr]
+        "openRound": pyclipr.EndType.Round,  # type: ignore[union-attr]
+        "openButt": pyclipr.EndType.Butt,  # type: ignore[union-attr]
+        "openSquare": pyclipr.EndType.Square,  # type: ignore[union-attr]
+    }
+    jt = join_map.get(join_type, pyclipr.JoinType.Miter)  # type: ignore[union-attr]
+    et = end_map.get(end_type, pyclipr.EndType.Polygon)  # type: ignore[union-attr]
+
+    po = pyclipr.ClipperOffset(miterLimit=miter_limit)  # type: ignore[union-attr]
+    for ring in path.rings:
+        scaled = _scale_polygon(ring)
+        po.addPath(scaled, jt, et)
+    result_paths = po.execute(distance * _SCALE)
+    rings = [_unscale_polygon(p) for p in result_paths]
+    return Path(rings=tuple(rings))
+
+
+def _try_as_box(ring: Polygon) -> Box | None:
+    """Return a Box if the ring is an axis-aligned rectangle, else None."""
+    pts = list(ring)
+    # Accept 4 or 5 points (5th repeats first to close the ring)
+    if len(pts) == 5 and pts[0] == pts[4]:
+        pts = pts[:4]
+    if len(pts) != 4:
+        return None
+    xs = {p[0] for p in pts}
+    ys = {p[1] for p in pts}
+    if len(xs) != 2 or len(ys) != 2:
+        return None
+    x0, x1 = sorted(xs)
+    y0, y1 = sorted(ys)
+    return Box(x0, y0, x1, y1)

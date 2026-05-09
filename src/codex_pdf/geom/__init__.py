@@ -40,9 +40,11 @@ from codex_pdf.geom.path import (
     Polygon,
     polygon_difference,
     polygon_intersect,
+    polygon_offset,
     polygon_union,
 )
 from codex_pdf.geom.tile import (
+    CellPlacement,
     MarksZone,
     TileGrid,
     TileResult,
@@ -57,11 +59,12 @@ from codex_pdf.geom.units import (
     user_units_to_pt,
 )
 
-GEOM_SCHEMA_VERSION = "1.0.0"
+GEOM_SCHEMA_VERSION = "1.1.0"
 """Per-section schema version for the ``/v1/geom/*`` HTTP surface."""
 
 __all__ = [
     "Box",
+    "CellPlacement",
     "GEOM_SCHEMA_VERSION",
     "HAS_PYCLIPR",
     "MarksZone",
@@ -75,6 +78,7 @@ __all__ = [
     "mm_to_pt",
     "polygon_difference",
     "polygon_intersect",
+    "polygon_offset",
     "polygon_union",
     "pt_to_in",
     "pt_to_mm",
