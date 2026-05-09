@@ -81,6 +81,29 @@ def test_extract_with_minimal_pdf(client: TestClient) -> None:
     assert "pages" in body
 
 
+def test_extract_stream_emits_two_phases(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract/stream",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+    events = [
+        json.loads(line[len("data: "):])
+        for line in resp.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert len(events) == 2, f"expected 2 SSE events, got {len(events)}"
+    p1, p2 = events
+    assert p1["extract_phase"] == 1
+    assert p2["extract_phase"] == 2
+    assert "pages" in p1
+    assert "pages" in p2
+    assert p1.get("ocgs") == []
+    assert isinstance(p2.get("ocgs"), list)
+
+
 def test_walk_content_stream_returns_signals(client: TestClient) -> None:
     pdf_bytes = PDF_PATH.read_bytes()
     resp = client.post(

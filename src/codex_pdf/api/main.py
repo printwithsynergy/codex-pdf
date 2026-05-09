@@ -43,7 +43,7 @@ import socket
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 import structlog
 from fastapi import (
@@ -57,7 +57,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -76,7 +76,7 @@ from codex_pdf.color import (
     resolve_spot_swatch_color,
 )
 from codex_pdf.color.color_math import lab_d50_to_srgb, srgb_decode
-from codex_pdf.extract import extract_document, extract_from_path
+from codex_pdf.extract import extract_document, extract_document_fast, extract_from_path
 from codex_pdf.geom import (
     GEOM_SCHEMA_VERSION,
     Box as GeomBox,
@@ -734,6 +734,67 @@ async def extract_endpoint(
 ) -> JSONResponse:
     """Extract a CodexDocument from an uploaded PDF or remote URL."""
     return await _extract_impl(request, pdf, endpoint_label="extract")
+
+
+@app.post("/v1/extract/stream", dependencies=[Depends(authenticate)])
+async def extract_stream_endpoint(
+    request: Request,
+    pdf: UploadFile | None = File(default=None),
+) -> StreamingResponse:
+    """Two-phase SSE extract for minimal time-to-first-data.
+
+    Emits two ``data:`` events separated by a blank line:
+    - Phase 1 (~200ms): PyMuPDF only — page dimensions, fonts, images,
+      annotations.  ``ocgs``, ``color_spaces``, ``output_intents``,
+      ``form_xobjects``, and ``analysis`` are empty placeholders.
+    - Phase 2 (~full extract time): complete CodexDocument with spot
+      colors, layer data, and analysis signals.
+
+    Both events carry ``extract_phase`` (1 or 2) and ``pdf_sha256`` at
+    the top level alongside the normal CodexDocument fields.  Consumers
+    can apply Phase 1 immediately for rendering and replace with Phase 2
+    when it arrives.
+    """
+    started = time.perf_counter()
+    try:
+        raw = await _read_extract_pdf(request, pdf)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"read failed: {exc}") from exc
+
+    sha = hashlib.sha256(raw).hexdigest()
+    _blob_store.put(sha, raw)
+    loop = asyncio.get_event_loop()
+
+    async def _generate() -> AsyncIterator[str]:
+        # Phase 1: PyMuPDF only — fast structural pass.
+        try:
+            p1_doc = await loop.run_in_executor(None, extract_document_fast, raw)
+            p1 = p1_doc.model_dump(mode="json")
+            p1["pdf_sha256"] = sha
+            p1["extract_phase"] = 1
+            yield f"data: {json.dumps(p1, separators=(',', ':'))}\n\n"
+        except Exception:
+            pass  # Phase 2 will still follow
+
+        # Phase 2: full extraction with parallel pikepdf passes.
+        try:
+            p2 = await loop.run_in_executor(None, _run_extract, raw)
+            if isinstance(p2, dict):
+                p2 = {**p2, "pdf_sha256": sha, "extract_phase": 2}
+            yield f"data: {json.dumps(p2, separators=(',', ':'))}\n\n"
+        except Exception:
+            pass
+
+        asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw))
+        _record("extract_stream", 200, time.perf_counter() - started)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------
