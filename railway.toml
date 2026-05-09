@@ -19,7 +19,7 @@ healthcheckPath = "/healthz"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
-numReplicas = 1
+numReplicas = 3
 sleepApplication = false
 
 # Required env vars (set per environment in the Railway dashboard or
