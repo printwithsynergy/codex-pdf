@@ -1,0 +1,21 @@
+tests/test_summary_dieline.py
+  s_cb053ee2d5790d::t_0be91970acf192 69-70,101-114
+src/codex_pdf/extract/dieline_detector.py
+  s_cb053ee2d5790d::t_e0bf7ef3d48c37 265,298-309,311,324,328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "1707eba6a069cf2a63fbed9b599adcbd779555f4",
+  "prompts": {},
+  "sessions": {
+    "s_cb053ee2d5790d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "48cf2f6f-4789-4348-8fbf-1596e90c099c",
+        "model": "premium"
+      },
+      "human_author": "Quincy Adams <quincy@thinkneverland.com>"
+    }
+  }
+}
