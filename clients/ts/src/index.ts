@@ -60,6 +60,37 @@ export class CodexClientError extends Error {
   }
 }
 
+/**
+ * Reference to a PDF input. Either raw bytes (uploads on every call)
+ * or ``{ sha256 }`` to reuse a previously-uploaded PDF in the codex
+ * server's blob cache. Hash refs avoid re-uploading the file on
+ * every render call — pass the ``pdf_sha256`` returned by
+ * ``extract()`` to subsequent ``renderPage``, ``renderSeparations``,
+ * etc.
+ *
+ * The server returns ``412 Precondition Failed`` if the hash isn't
+ * in the cache (e.g. expired). Callers should catch that and retry
+ * with the raw bytes.
+ *
+ * @public
+ */
+export type PdfRef =
+  | ArrayBuffer
+  | Uint8Array
+  | Blob
+  | { readonly sha256: string };
+
+/**
+ * Response from ``extract()`` — the parsed CodexDocument plus the
+ * sha256 the server cached the PDF under, for hash-only follow-ups.
+ *
+ * @public
+ */
+export interface ExtractResponse {
+  readonly pdf_sha256: string;
+  readonly [key: string]: unknown;
+}
+
 export interface ColorSample {
   x: number;
   y: number;
@@ -446,7 +477,7 @@ export class HttpClient {
   }
 
   private buildForm(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     fields: Record<string, unknown> = {},
     filename = "input.pdf",
   ): FormData {
@@ -470,8 +501,12 @@ export class HttpClient {
       const ab = new ArrayBuffer(pdf.byteLength);
       new Uint8Array(ab).set(pdf);
       blob = new Blob([ab], { type: "application/pdf" });
-    } else {
+    } else if (pdf instanceof ArrayBuffer) {
       blob = new Blob([pdf], { type: "application/pdf" });
+    } else {
+      // Hash-only ref — server resolves bytes from its blob cache.
+      fd.set("pdf_sha256", pdf.sha256);
+      return fd;
     }
     fd.set("pdf", blob, filename);
     return fd;
@@ -669,16 +704,16 @@ export class HttpClient {
 
   // ----------------------- extract ------------------------------
 
-  async extract(pdf: ArrayBuffer | Uint8Array | Blob): Promise<unknown> {
+  async extract(pdf: ArrayBuffer | Uint8Array | Blob): Promise<ExtractResponse> {
     const fd = this.buildForm(pdf, {});
     const res = await this.post("/v1/extract", fd);
-    return (await res.json()) as unknown;
+    return (await res.json()) as ExtractResponse;
   }
 
   // ----------------------- render -------------------------------
 
   async renderPage(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     opts: RenderPageOptions = {},
   ): Promise<Uint8Array> {
     const fd = this.buildForm(pdf, {
@@ -693,7 +728,7 @@ export class HttpClient {
   }
 
   async renderSeparations(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     opts: { page?: number; dpi?: number } = {},
   ): Promise<SeparationsResult> {
     const fd = this.buildForm(pdf, {
@@ -705,7 +740,7 @@ export class HttpClient {
   }
 
   async renderHeatmap(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     opts: { page?: number; dpi?: number; tacLimit?: number } = {},
   ): Promise<HeatmapResult> {
     const fd = this.buildForm(pdf, {
@@ -726,7 +761,7 @@ export class HttpClient {
   }
 
   async renderLayer(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     opts: {
       page?: number;
       layerIndex: number;
@@ -747,7 +782,7 @@ export class HttpClient {
   // ----------------------- sample -------------------------------
 
   async sampleColor(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     opts: {
       page?: number;
       x: number;
@@ -771,7 +806,7 @@ export class HttpClient {
   }
 
   async sampleDensity(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     opts: {
       page?: number;
       x: number;
@@ -797,7 +832,7 @@ export class HttpClient {
   }
 
   async walkContentStream(
-    pdf: ArrayBuffer | Uint8Array | Blob,
+    pdf: PdfRef,
     opts: { page?: number } = {},
   ): Promise<{ page_num: number; signals: Record<string, unknown> }> {
     const fd = this.buildForm(pdf, { page: opts.page ?? 1 });

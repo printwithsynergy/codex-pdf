@@ -32,6 +32,7 @@ Endpoints:
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -55,6 +56,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from codex_pdf.api.auth import authenticate
+from codex_pdf.api.blob_store import make_blob_store
 from codex_pdf.api.cache import cache_key, make_cache
 from codex_pdf.api.url_ingest import fetch_pdf_from_url
 from codex_pdf.color import (
@@ -138,6 +140,7 @@ def _record(endpoint: str, status_code: int, duration: float) -> None:
 # ---------------------------------------------------------------------------
 
 _cache = make_cache()
+_blob_store = make_blob_store()
 
 
 def _repo_root() -> Path:
@@ -362,6 +365,45 @@ async def _read_pdf_bytes(file: UploadFile) -> bytes:
     return raw
 
 
+async def _resolve_pdf_bytes(
+    pdf: UploadFile | None,
+    pdf_sha256: str | None,
+) -> tuple[bytes, str]:
+    """Get PDF bytes from either a multipart upload or the blob store.
+
+    Caches uploads by sha256 so subsequent calls in the same session
+    can pass ``pdf_sha256`` instead of re-uploading the file. Returns
+    ``(raw_bytes, sha256_hex)``. Raises ``412`` if the hash isn't in
+    the blob store and no upload was provided.
+    """
+    if pdf is not None:
+        raw = await pdf.read()
+        if raw:
+            sha = hashlib.sha256(raw).hexdigest()
+            _blob_store.put(sha, raw)
+            return raw, sha
+        # Fall through to blob lookup if upload was empty/blank but
+        # a hash was also provided (browser quirks with optional
+        # multipart fields).
+    if pdf_sha256:
+        cleaned = pdf_sha256.strip()
+        if cleaned:
+            cached = _blob_store.get(cleaned)
+            if cached is not None:
+                return cached, cleaned
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail=(
+                    f"pdf_sha256 {cleaned[:16]}... not in cache (expired or never "
+                    "uploaded). Re-upload the PDF as a multipart 'pdf' field."
+                ),
+            )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="must provide either 'pdf' multipart field or 'pdf_sha256' form field",
+    )
+
+
 def _parse_int_list(raw: str | None) -> list[int]:
     if not raw:
         return []
@@ -570,7 +612,13 @@ async def _extract_impl(
     started = time.perf_counter()
     try:
         raw = await _read_extract_pdf(request, pdf)
+        sha = hashlib.sha256(raw).hexdigest()
+        _blob_store.put(sha, raw)
         payload = _run_extract(raw)
+        # Surface the cache key so clients can switch to hash-based
+        # render calls without re-uploading on every interaction.
+        if isinstance(payload, dict):
+            payload["pdf_sha256"] = sha
         _record(endpoint_label, 200, time.perf_counter() - started)
         return JSONResponse(payload)
     except HTTPException as exc:
@@ -609,7 +657,8 @@ async def extract_endpoint(
 
 @app.post("/v1/render/page", dependencies=[Depends(authenticate)])
 async def render_page_endpoint(
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
     dpi: int = Form(default=300),
     ocg_on: str | None = Form(default=None),
@@ -618,7 +667,7 @@ async def render_page_endpoint(
 ) -> Response:
     started = time.perf_counter()
     try:
-        raw = await _read_pdf_bytes(pdf)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
         on_list = _parse_int_list(ocg_on)
         off_list = _parse_int_list(ocg_off)
         args = {
@@ -661,7 +710,8 @@ async def render_page_endpoint(
 
 @app.post("/v1/render/separations", dependencies=[Depends(authenticate)])
 async def render_separations_endpoint(
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
     dpi: int = Form(default=150),
 ) -> JSONResponse:
@@ -673,7 +723,7 @@ async def render_separations_endpoint(
     """
     started = time.perf_counter()
     try:
-        raw = await _read_pdf_bytes(pdf)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
         args = {"page": page, "dpi": dpi}
         key = cache_key(raw, args, kind="separations")
         cached = _cache.get(key)
@@ -711,14 +761,15 @@ async def render_separations_endpoint(
 
 @app.post("/v1/render/heatmap", dependencies=[Depends(authenticate)])
 async def render_heatmap_endpoint(
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
     dpi: int = Form(default=150),
     tac_limit: float = Form(default=300),
 ) -> Response:
     started = time.perf_counter()
     try:
-        raw = await _read_pdf_bytes(pdf)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
         args = {"page": page, "dpi": dpi, "tac_limit": tac_limit}
         key = cache_key(raw, args, kind="heatmap")
         cached = _cache.get(key)
@@ -753,7 +804,8 @@ async def render_heatmap_endpoint(
 
 @app.post("/v1/render/layer", dependencies=[Depends(authenticate)])
 async def render_layer_endpoint(
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
     layer_index: int = Form(...),
     all_layer_indices: str = Form(...),
@@ -761,7 +813,7 @@ async def render_layer_endpoint(
 ) -> Response:
     started = time.perf_counter()
     try:
-        raw = await _read_pdf_bytes(pdf)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
         all_idx = _parse_int_list(all_layer_indices)
         args = {
             "page": page,
@@ -815,7 +867,8 @@ async def _read_pdf_field(pdf: UploadFile | None) -> bytes:
 
 @app.post("/v1/sample/color", dependencies=[Depends(authenticate)])
 async def sample_color_endpoint(
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
     x: float = Form(...),
     y: float = Form(...),
@@ -825,7 +878,7 @@ async def sample_color_endpoint(
 ) -> JSONResponse:
     started = time.perf_counter()
     try:
-        raw = await _read_pdf_field(pdf)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
         if page_w is None or page_h is None:
             mb = get_page_media_box(raw, page)
             page_w = mb[2] - mb[0]
@@ -855,7 +908,8 @@ async def sample_color_endpoint(
 
 @app.post("/v1/sample/density", dependencies=[Depends(authenticate)])
 async def sample_density_endpoint(
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
     x: float = Form(...),
     y: float = Form(...),
@@ -866,7 +920,7 @@ async def sample_density_endpoint(
 ) -> JSONResponse:
     started = time.perf_counter()
     try:
-        raw = await _read_pdf_field(pdf)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
         if page_w is None or page_h is None:
             mb = get_page_media_box(raw, page)
             page_w = mb[2] - mb[0]
@@ -930,12 +984,13 @@ async def walk_type4_endpoint(body: Type4Request) -> Type4Response:
 
 @app.post("/v1/walk/content-stream", dependencies=[Depends(authenticate)])
 async def walk_content_stream_endpoint(
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
 ) -> JSONResponse:
     started = time.perf_counter()
     try:
-        raw = await _read_pdf_field(pdf)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
         args = {"page": page}
         key = cache_key(raw, args, kind="walk-content-stream")
         cached = _cache.get(key)
