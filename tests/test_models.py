@@ -14,5 +14,5 @@ def test_document_minimum_shape() -> None:
         ],
     )
     payload = doc.model_dump(mode="json")
-    assert payload["schema_version"] == "1.0.0"
+    assert payload["schema_version"] == "1.1.0"
     assert payload["pages"][0]["page_num"] == 1
