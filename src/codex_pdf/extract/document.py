@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from concurrent.futures import ThreadPoolExecutor, Future
 from pathlib import Path
+
+# Shared pool for all parallel pikepdf extraction passes. Created once per
+# process (safe with gunicorn pre-fork: workers import this after fork).
+_EXTRACT_POOL = ThreadPoolExecutor(
+    max_workers=os.cpu_count() or 4,
+    thread_name_prefix="codex-extract",
+)
 
 from codex_pdf.models.v1 import CodexDocument, CodexInfoDict, CodexSourceRef, CodexXmpPacket
 from codex_pdf.version import __version__
@@ -68,27 +76,26 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
         pass
 
     # Run the four independent pikepdf extractors concurrently.
-    with ThreadPoolExecutor(max_workers=4) as _pool:
-        _f_color: Future = _pool.submit(extract_color_world_pikepdf, pdf_bytes)
-        _f_ocgs: Future = _pool.submit(extract_ocgs_pikepdf, pdf_bytes)
-        _f_forms: Future = _pool.submit(extract_forms_pikepdf, pdf_bytes)
-        _f_signals: Future = _pool.submit(extract_analysis_signals_pikepdf, pdf_bytes)
-        try:
-            output_intents, color_spaces = _f_color.result()
-        except Exception:
-            output_intents, color_spaces = [], []
-        try:
-            ocgs = _f_ocgs.result()
-        except Exception:
-            ocgs = []
-        try:
-            form_xobjects = _f_forms.result()
-        except Exception:
-            form_xobjects = []
-        try:
-            analysis = _f_signals.result()
-        except Exception:
-            analysis = {}
+    _f_color: Future = _EXTRACT_POOL.submit(extract_color_world_pikepdf, pdf_bytes)
+    _f_ocgs: Future = _EXTRACT_POOL.submit(extract_ocgs_pikepdf, pdf_bytes)
+    _f_forms: Future = _EXTRACT_POOL.submit(extract_forms_pikepdf, pdf_bytes)
+    _f_signals: Future = _EXTRACT_POOL.submit(extract_analysis_signals_pikepdf, pdf_bytes)
+    try:
+        output_intents, color_spaces = _f_color.result()
+    except Exception:
+        output_intents, color_spaces = [], []
+    try:
+        ocgs = _f_ocgs.result()
+    except Exception:
+        ocgs = []
+    try:
+        form_xobjects = _f_forms.result()
+    except Exception:
+        form_xobjects = []
+    try:
+        analysis = _f_signals.result()
+    except Exception:
+        analysis = {}
     trap_evidence = extract_trap_evidence(
         trapped_flag=trapped_flag,
         ocg_names=[x.name for x in ocgs],
@@ -170,22 +177,21 @@ def extract_document_fast(pdf_bytes: bytes, *, source_uri: str | None = None) ->
     color_spaces: list = []
     ocgs: list = []
     form_xobjects: list = []
-    with ThreadPoolExecutor(max_workers=3) as _pool:
-        _f_color: Future = _pool.submit(extract_color_world_pikepdf, pdf_bytes)
-        _f_ocgs: Future = _pool.submit(extract_ocgs_pikepdf, pdf_bytes)
-        _f_forms: Future = _pool.submit(extract_forms_pikepdf, pdf_bytes)
-        try:
-            output_intents, color_spaces = _f_color.result()
-        except Exception:
-            pass
-        try:
-            ocgs = _f_ocgs.result()
-        except Exception:
-            pass
-        try:
-            form_xobjects = _f_forms.result()
-        except Exception:
-            pass
+    _f_color2: Future = _EXTRACT_POOL.submit(extract_color_world_pikepdf, pdf_bytes)
+    _f_ocgs2: Future = _EXTRACT_POOL.submit(extract_ocgs_pikepdf, pdf_bytes)
+    _f_forms2: Future = _EXTRACT_POOL.submit(extract_forms_pikepdf, pdf_bytes)
+    try:
+        output_intents, color_spaces = _f_color2.result()
+    except Exception:
+        pass
+    try:
+        ocgs = _f_ocgs2.result()
+    except Exception:
+        pass
+    try:
+        form_xobjects = _f_forms2.result()
+    except Exception:
+        pass
 
     trap_evidence = extract_trap_evidence(
         trapped_flag=trapped_flag,

@@ -14,7 +14,7 @@ dockerfilePath = "Dockerfile"
 # startCommand is exec'd directly without a shell, which would
 # otherwise pass the literal `$PORT` to uvicorn and crash with
 # "Invalid value for '--port': '$PORT' is not a valid integer."
-startCommand = "sh -c '/opt/venv/bin/uvicorn codex_pdf.api.main:app --host 0.0.0.0 --port ${PORT:-8080}'"
+startCommand = "sh -c '/opt/venv/bin/gunicorn -w ${CODEX_WORKERS:-2} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8080} --timeout 120 --graceful-timeout 30 codex_pdf.api.main:app'"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
@@ -33,3 +33,21 @@ sleepApplication = false
 #   FETCH_MAX_BYTES            Hard download cap (default 52428800)
 #   CODEX_BEARER_TOKEN         Optional bearer fallback for marketing
 #   CODEX_INTERNAL_TOKEN       Optional sidecar-internal token
+#
+# Scaling env vars (horizontal / throughput, no plan upgrade required):
+#
+#   CODEX_WORKERS    Gunicorn worker count. Default: 2. Each worker is a
+#                    full Python process — increase on plans with more vCPUs
+#                    (e.g. 4 on Pro). More workers = more concurrent extractions
+#                    without blocking each other.
+#
+#   CODEX_REDIS_URL  Redis connection URL (e.g. redis://redis.railway.internal:6379).
+#                    Enables shared extraction cache across workers AND replicas.
+#                    Without this, each worker/replica caches independently and
+#                    re-extracts the same PDF. Required before bumping numReplicas > 1.
+#
+# Horizontal replicas:
+#   Set numReplicas = 2 (or 3) after provisioning a Railway Redis service and
+#   setting CODEX_REDIS_URL. Each replica is an independent service instance
+#   that shares the extraction cache — linear throughput scaling at zero extra
+#   latency per request.

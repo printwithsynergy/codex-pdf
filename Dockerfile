@@ -91,7 +91,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/healthz" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-# Bypass `uv run` at runtime — the venv is already prepared. Calling
-# uvicorn directly from /opt/venv/bin avoids any sync attempt against
-# the read-only image and lets the entrypoint expand `$PORT`.
-CMD ["sh", "-c", "/opt/venv/bin/uvicorn codex_pdf.api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Gunicorn + uvicorn workers: multiple processes share the Railway CPU budget
+# without adding RAM/CPU to the plan. CODEX_WORKERS defaults to 2 (safe for
+# Railway hobby — 2 shared vCPUs). Set higher on Pro/Team plans.
+# Single-replica deployments still benefit from 2 workers handling concurrent
+# requests without one blocking another during extraction.
+CMD ["sh", "-c", "/opt/venv/bin/gunicorn -w ${CODEX_WORKERS:-2} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8080} --timeout 120 --graceful-timeout 30 codex_pdf.api.main:app"]

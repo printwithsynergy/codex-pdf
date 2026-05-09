@@ -5,6 +5,27 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Any
 
+# Operators actually consumed by lint-pdf analyzers (dieline + dieline_quality).
+# All other operators (inline images, line-width/cap/join, CMYK/RGB/gray color
+# setters, shading, etc.) are skipped — no downstream reader uses them and they
+# account for the majority of instructions in large production PDFs.
+_LINT_RELEVANT_OPS: frozenset[str] = frozenset({
+    # path construction
+    "m", "l", "c", "v", "y", "re", "h",
+    # path painting / clipping
+    "S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n", "W", "W*",
+    # graphics state
+    "q", "Q", "cm", "gs",
+    # color space selection (not color value setters)
+    "CS", "cs", "SC", "SCN", "sc", "scn",
+    # marked content (OCG/layer tagging)
+    "BDC", "BMC", "EMC",
+    # text operators needed for dieline text detection
+    "BT", "ET", "Tf", "Tm", "T*", "Td", "TD", "TJ", "Tj",
+    # XObject invocation
+    "Do",
+})
+
 
 def extract_analysis_signals_pikepdf(pdf_bytes: bytes) -> dict[str, Any]:
     """Extract additive analyzer-oriented signals for codex consumers."""
@@ -52,6 +73,8 @@ def _extract_page_signals(page: Any) -> dict[str, Any]:
     for inst in instructions:
         try:
             op = str(getattr(inst, "operator", ""))
+            if op not in _LINT_RELEVANT_OPS:
+                continue
             operands = list(getattr(inst, "operands", []))
         except Exception:
             continue

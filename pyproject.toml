@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-pdf"
-version = "1.5.4"
+version = "1.5.5"
 description = "Authoritative, versioned PDF facts contract for Think Neverland tools."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,6 +17,7 @@ dependencies = [
   "pikepdf>=9.0",
   "fastapi>=0.115",
   "uvicorn>=0.30",
+  "gunicorn>=23.0",
   "python-multipart>=0.0.9",
   "structlog>=24.1",
 ]
