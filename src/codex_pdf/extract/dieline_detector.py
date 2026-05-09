@@ -262,6 +262,7 @@ def _estimate_dieline_size(
     *,
     overall_confidence: float,
 ) -> CodexSummaryDielineSizeMetrics:
+    geometry_fallback_confidence = 0.35
     page_targets = _page_targets_from_candidates(candidates)
     all_signals = _iter_page_signals(doc.analysis)
     if not all_signals:
@@ -294,8 +295,20 @@ def _estimate_dieline_size(
     y1 = max(b[3] for b in bboxes)
     width_pt = max(0.0, x1 - x0)
     height_pt = max(0.0, y1 - y0)
+    size_available = width_pt > 0 or height_pt > 0
+    if size_available:
+        if overall_confidence > 0.0:
+            size_confidence = max(0.0, min(1.0, overall_confidence))
+            confidence_basis = "candidate_overall_confidence"
+        else:
+            # Keep confidence non-zero when geometry itself produced dimensions.
+            size_confidence = geometry_fallback_confidence
+            confidence_basis = "geometry_fallback_no_candidate_signal"
+    else:
+        size_confidence = 0.0
+        confidence_basis = "unavailable"
     return CodexSummaryDielineSizeMetrics(
-        available=width_pt > 0 or height_pt > 0,
+        available=size_available,
         width_pt=round(width_pt, 3),
         height_pt=round(height_pt, 3),
         width_mm=round(width_pt * 25.4 / 72.0, 3),
@@ -308,10 +321,11 @@ def _estimate_dieline_size(
         depth_available=False,
         depth_note="Unavailable from 2D PDF geometry",
         source="analysis_stroke_bbox",
-        confidence=max(0.0, min(1.0, overall_confidence)),
+        confidence=size_confidence,
         provenance=[
             f"pages={','.join(str(page) for page, _ in selected)}",
             "derived_from=analysis.content_ops stroked-path union",
+            f"confidence_basis={confidence_basis}",
         ],
     )
 

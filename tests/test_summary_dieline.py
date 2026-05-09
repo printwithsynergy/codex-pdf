@@ -66,6 +66,8 @@ def test_dieline_summary_detects_structural_candidates_without_spot_names() -> N
     assert summary.dieline.size.depth_available is False
     assert summary.dieline.size.depth_pt is None
     assert summary.dieline.size.source == "analysis_stroke_bbox"
+    assert summary.dieline.size.confidence > 0.0
+    assert "confidence_basis=candidate_overall_confidence" in summary.dieline.size.provenance
 
 
 def test_dieline_summary_uses_non_first_page_analysis() -> None:
@@ -94,6 +96,22 @@ def test_dieline_summary_overall_confidence_defaults_to_zero() -> None:
     assert summary.dieline.overall_confidence == 0.0
     assert summary.dieline.size.available is False
     assert summary.dieline.size.source == "unavailable"
+
+
+def test_dieline_size_confidence_uses_geometry_fallback_when_no_candidates() -> None:
+    # Geometry can still produce dimensions even when no strong dieline signals were detected.
+    ops = [
+        {"op": "m", "operands": [0, 0]},
+        {"op": "l", "operands": [144, 72]},
+        {"op": "S", "operands": []},
+    ]
+    summary = build_document_summary(_doc_with_analysis({"page_1": {"content_ops": ops}}))
+    assert summary.dieline.count == 0
+    assert summary.dieline.overall_confidence == 0.0
+    assert summary.dieline.size.available is True
+    assert summary.dieline.size.source == "analysis_stroke_bbox"
+    assert summary.dieline.size.confidence > 0.0
+    assert "confidence_basis=geometry_fallback_no_candidate_signal" in summary.dieline.size.provenance
 
 
 def _negative_structural_ops() -> list[dict[str, object]]:
