@@ -61,7 +61,7 @@ from codex_pdf.color.resolver import (
     resolve_spot_swatch_color,
 )
 
-COLOR_SCHEMA_VERSION = "1.0.0"
+COLOR_SCHEMA_VERSION = "1.1.0"
 """Per-section schema version for the ``/v1/color/*`` HTTP surface.
 
 Bumped independently of the top-level codex-document schema so a

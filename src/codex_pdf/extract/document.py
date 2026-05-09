@@ -42,6 +42,7 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
     trapped_flag = None
     analysis: dict[str, object] = {}
 
+    is_linearized = False
     try:
         import fitz
 
@@ -59,6 +60,8 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
                 page.transparency_tree = transparency[page.page_num - 1]
 
         trapped_flag = derive_trapped_flag(doc)
+        # Linearized PDFs (fast web view) have a /Linearized dict in the first xref.
+        is_linearized = bool(getattr(doc, "is_fast_webview", False))
     except Exception:
         # Fall back to skeleton with minimal metadata.
         pass
@@ -80,6 +83,7 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
         source=CodexSourceRef(uri=source_uri, sha256=digest, size_bytes=len(pdf_bytes)),
         pdf_version=pdf_version,
         is_encrypted=is_encrypted,
+        is_linearized=is_linearized,
         conformance=conformance_claims_from_metadata(info, xmp),
         info=info,
         xmp=xmp,

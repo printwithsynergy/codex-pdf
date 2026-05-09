@@ -36,11 +36,15 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
+import socket
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
+import structlog
 from fastapi import (
     Depends,
     FastAPI,
@@ -54,6 +58,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from codex_pdf.api.auth import authenticate
 from codex_pdf.api.blob_store import make_blob_store
@@ -74,11 +79,13 @@ from codex_pdf.extract import extract_from_path
 from codex_pdf.geom import (
     GEOM_SCHEMA_VERSION,
     Box as GeomBox,
+    CellPlacement,
     MarksZone,
     Path as GeomPath,
     TileGrid,
     polygon_difference,
     polygon_intersect,
+    polygon_offset,
     polygon_union,
     tile_grid,
 )
@@ -165,6 +172,19 @@ app = FastAPI(
     ),
 )
 
+_INSTANCE_ID: str = os.environ.get("CODEX_INSTANCE_ID") or socket.gethostname()
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        request_id = request.headers.get("X-Codex-Request-Id") or str(uuid.uuid4())
+        response = await call_next(request)
+        response.headers["X-Codex-Request-Id"] = request_id
+        return response
+
+
+app.add_middleware(RequestIdMiddleware)
+
 
 # ---------------------------------------------------------------------------
 # Request / response models.
@@ -214,6 +234,7 @@ class HealthResponse(BaseModel):
     version: str
     ghostscript: bool
     cache_backend: str
+    instance_id: str | None = None
 
 
 class VersionResponse(BaseModel):
@@ -308,6 +329,25 @@ class GeomMarksZoneModel(BaseModel):
     left: float = 0.0
 
 
+class NeutralDensityRequest(BaseModel):
+    """Body for ``POST /v1/color/neutral-density``.
+
+    Provide exactly one of ``name`` (resolved via spot resolver),
+    ``lab`` (CIE Lab D50 triple), or ``cmyk`` (0–100 quad). Lab and
+    CMYK inputs bypass the spot resolver and compute ND directly.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    lab: LabValue | None = None
+    cmyk: CmykValue | None = None
+
+
+class NeutralDensityResponse(BaseModel):
+    schema_version: str
+    neutral_density: float
+    source: str
+
+
 class GeomTileRequest(BaseModel):
     sheet: GeomBoxModel
     cell_width: float = Field(..., gt=0)
@@ -316,6 +356,22 @@ class GeomTileRequest(BaseModel):
     gutter_y: float = Field(default=0.0, ge=0)
     marks_zone: GeomMarksZoneModel = GeomMarksZoneModel()
     origin: str = Field(default="bottom-left", pattern="^(bottom-left|top-left)$")
+    # §16.2 extension fields
+    cell_rotation: float = 0.0
+    cell_rotation_pattern: list[list[float]] | None = None
+    flip_per_row: bool = False
+    flip_pattern: list[list[bool]] | None = None
+    bleed_handling: str = Field(default="none", pattern="^(none|trim|extend)$")
+    bleed: float = Field(default=0.0, ge=0)
+
+
+class CellPlacementModel(BaseModel):
+    box: list[float]
+    rotation: float = 0.0
+    flip_h: bool = False
+    flip_v: bool = False
+    row: int = 0
+    col: int = 0
 
 
 class GeomTileResponse(BaseModel):
@@ -323,8 +379,32 @@ class GeomTileResponse(BaseModel):
     rows: int
     cols: int
     cells: list[list[float]]
+    placements: list[CellPlacementModel] = Field(default_factory=list)
     used: list[float]
     waste: list[float]
+
+
+class GeomOffsetRequest(BaseModel):
+    """Body for ``POST /v1/geom/offset``.
+
+    ``path`` is a list of polygon rings (each ring is a list of ``[x, y]``
+    points). ``distance_pt`` is the offset distance in PDF user-space points;
+    negative values shrink (choke), positive values grow (spread).
+    """
+
+    path: list[list[list[float]]]
+    distance_pt: float
+    join_type: str = Field(default="miter", pattern="^(miter|round|square)$")
+    end_type: str = Field(
+        default="polygon",
+        pattern="^(polygon|joined_round|joined_square|butt|square|round)$",
+    )
+    miter_limit: float = Field(default=2.0, gt=0)
+
+
+class GeomOffsetResponse(BaseModel):
+    schema_version: str
+    rings: list[list[list[float]]]
 
 
 class GeomBooleanRequest(BaseModel):
@@ -441,6 +521,7 @@ async def healthz() -> HealthResponse:
         version=VERSION,
         ghostscript=has_ghostscript(),
         cache_backend=getattr(_cache, "name", type(_cache).__name__.lower()),
+        instance_id=_INSTANCE_ID,
     )
 
 
@@ -453,7 +534,7 @@ async def version() -> VersionResponse:
 async def contract() -> ContractResponse:
     return ContractResponse(
         contract_name="codex-document",
-        schema_version="1.0.0",
+        schema_version="1.1.0",
         package_version=VERSION,
         schema_id="https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
         endpoints=[
@@ -469,10 +550,12 @@ async def contract() -> ContractResponse:
             "POST /v1/color/resolve",
             "POST /v1/color/match-pantone",
             "GET /v1/color/inkbook",
+            "POST /v1/color/neutral-density",
             "POST /v1/geom/tile",
             "POST /v1/geom/intersect",
             "POST /v1/geom/union",
             "POST /v1/geom/difference",
+            "POST /v1/geom/offset",
             "GET /v1/healthz",
             "GET /v1/version",
             "GET /v1/contract",
@@ -619,6 +702,21 @@ async def _extract_impl(
         # render calls without re-uploading on every interaction.
         if isinstance(payload, dict):
             payload["pdf_sha256"] = sha
+            # Phase C: pre-render page 1 at 150 DPI and embed in response so
+            # the first viewer render can skip a round-trip.
+            try:
+                pre_key = cache_key(raw, {"page": 1, "dpi": 150}, kind="pre-render")
+                pre_png = _cache.get(pre_key)
+                if pre_png is None:
+                    pre_png = render_page(
+                        raw, 1, dpi=150, ocg_on=[], ocg_off=[], simulate_overprint=True
+                    )
+                    _cache.set(pre_key, pre_png)
+                payload["pre_rendered"] = {
+                    "page_1_dpi_150": base64.b64encode(pre_png).decode("ascii")
+                }
+            except Exception:
+                pass  # never fail extract because of pre-render
         _record(endpoint_label, 200, time.perf_counter() - started)
         return JSONResponse(payload)
     except HTTPException as exc:
@@ -1273,6 +1371,78 @@ async def color_inkbook_endpoint(
         ) from exc
 
 
+def _nd_from_lab(lab: tuple[float, float, float]) -> float:
+    """Compute neutral density from CIE L* using the luminance relationship.
+
+    ND = -log10(Y_rel), where Y_rel = ((L* + 16) / 116)^3 per CIELAB.
+    """
+    L = max(0.0, min(100.0, lab[0]))
+    Y_rel = max(1e-7, ((L + 16.0) / 116.0) ** 3)
+    return round(-math.log10(Y_rel), 4)
+
+
+@app.post(
+    "/v1/color/neutral-density",
+    response_model=NeutralDensityResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def color_neutral_density_endpoint(
+    body: NeutralDensityRequest,
+) -> NeutralDensityResponse:
+    """Return the neutral density for a spot colorant.
+
+    Accepts ``name`` (resolved via spot-color ladder), ``lab`` (CIE Lab D50),
+    or ``cmyk`` (0–100 quad). Lab is the most accurate; CMYK uses the naïve
+    linearisation. If resolved from a named Pantone entry whose Lab is known
+    the source is ``computed_from_lab``; for hash-resolved colours it is
+    ``estimated``.
+    """
+    started = time.perf_counter()
+    try:
+        lab: tuple[float, float, float] | None = None
+        source: str = "computed_from_lab"
+
+        if body.lab is not None:
+            lab = _coerce_lab(body.lab)
+            source = "computed_from_lab"
+        elif body.cmyk is not None:
+            cmyk = _coerce_cmyk(body.cmyk)
+            lab = _cmyk_to_lab_via_srgb(cmyk)  # type: ignore[arg-type]
+            source = "estimated"
+        elif body.name is not None:
+            result = resolve_spot_swatch_color(body.name)
+            if result.lab is not None:
+                lab = result.lab
+                source = "computed_from_lab" if result.pantone_name else "estimated"
+            else:
+                # Fall back via RGB → Lab
+                rgb = result.rgb
+                lab = _srgb_to_lab(rgb)
+                source = "estimated"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="neutral-density requires one of {name, lab, cmyk}",
+            )
+
+        nd = _nd_from_lab(lab)  # type: ignore[arg-type]
+        _record("color_neutral_density", 200, time.perf_counter() - started)
+        return NeutralDensityResponse(
+            schema_version=COLOR_SCHEMA_VERSION,
+            neutral_density=nd,
+            source=source,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("color_neutral_density failed")
+        _record("color_neutral_density", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"color_neutral_density failed: {exc}",
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Geometry primitives. Pure-data — no PDF emit. Useful for imposition
 # previews, layer-bbox math, and trap-zone planning before any
@@ -1302,6 +1472,17 @@ async def geom_tile_endpoint(body: GeomTileRequest) -> GeomTileResponse:
             bottom=body.marks_zone.bottom,
             left=body.marks_zone.left,
         )
+        # Convert list[list[float]] → tuple[tuple[float,...],...]  for dataclass
+        rot_pat = (
+            tuple(tuple(row) for row in body.cell_rotation_pattern)
+            if body.cell_rotation_pattern is not None
+            else None
+        )
+        flip_pat = (
+            tuple(tuple(row) for row in body.flip_pattern)
+            if body.flip_pattern is not None
+            else None
+        )
         result = tile_grid(
             TileGrid(
                 sheet=sheet_box,
@@ -1311,6 +1492,12 @@ async def geom_tile_endpoint(body: GeomTileRequest) -> GeomTileResponse:
                 gutter_y=body.gutter_y,
                 marks_zone=marks,
                 origin=body.origin,
+                cell_rotation=body.cell_rotation,
+                cell_rotation_pattern=rot_pat,
+                flip_per_row=body.flip_per_row,
+                flip_pattern=flip_pat,
+                bleed_handling=body.bleed_handling,  # type: ignore[arg-type]
+                bleed=body.bleed,
             )
         )
         _record("geom_tile", 200, time.perf_counter() - started)
@@ -1318,7 +1505,18 @@ async def geom_tile_endpoint(body: GeomTileRequest) -> GeomTileResponse:
             schema_version=GEOM_SCHEMA_VERSION,
             rows=result.rows,
             cols=result.cols,
-            cells=[cell.to_list() for cell in result.cells],
+            cells=[cell.box.to_list() for cell in result.cells],
+            placements=[
+                CellPlacementModel(
+                    box=cell.box.to_list(),
+                    rotation=cell.rotation,
+                    flip_h=cell.flip_h,
+                    flip_v=cell.flip_v,
+                    row=cell.row,
+                    col=cell.col,
+                )
+                for cell in result.cells
+            ],
             used=result.used.to_list(),
             waste=result.waste.to_list(),
         )
@@ -1461,4 +1659,45 @@ async def geom_difference_endpoint(body: GeomBooleanRequest) -> GeomBooleanRespo
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"geom_difference failed: {exc}",
+        ) from exc
+
+
+@app.post(
+    "/v1/geom/offset",
+    response_model=GeomOffsetResponse,
+    dependencies=[Depends(authenticate)],
+)
+async def geom_offset_endpoint(body: GeomOffsetRequest) -> GeomOffsetResponse:
+    """Offset (spread/choke) a polygon path by ``distance_pt`` points.
+
+    Positive distance grows (spread); negative shrinks (choke). Uses
+    pyclipr (Clipper2) when installed, with a rectangle fast-path
+    fallback for axis-aligned rectangles when pyclipr is absent.
+    """
+    started = time.perf_counter()
+    try:
+        path = GeomPath.from_json(body.path)
+        result = polygon_offset(
+            path,
+            body.distance_pt,
+            join_type=body.join_type,
+            end_type=body.end_type,
+            miter_limit=body.miter_limit,
+        )
+        _record("geom_offset", 200, time.perf_counter() - started)
+        return GeomOffsetResponse(
+            schema_version=GEOM_SCHEMA_VERSION,
+            rings=[[[p[0], p[1]] for p in ring] for ring in result.rings],
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        _record("geom_offset", 501, time.perf_counter() - started)
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("geom_offset failed")
+        _record("geom_offset", 500, time.perf_counter() - started)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"geom_offset failed: {exc}",
         ) from exc
