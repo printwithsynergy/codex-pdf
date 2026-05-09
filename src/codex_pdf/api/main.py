@@ -31,6 +31,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -75,7 +76,7 @@ from codex_pdf.color import (
     resolve_spot_swatch_color,
 )
 from codex_pdf.color.color_math import lab_d50_to_srgb, srgb_decode
-from codex_pdf.extract import extract_from_path
+from codex_pdf.extract import extract_document, extract_from_path
 from codex_pdf.geom import (
     GEOM_SCHEMA_VERSION,
     Box as GeomBox,
@@ -670,23 +671,22 @@ def _run_extract(raw: bytes) -> dict[str, Any]:
     if cached is not None:
         return json.loads(cached)
 
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-    try:
-        doc = extract_from_path(Path(tmp_path))
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-
+    doc = extract_document(raw)
     payload = doc.model_dump(mode="json")
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     _cache.set(key, body)
     return payload
+
+
+def _pre_render_bg(raw: bytes) -> None:
+    """Warm the render cache for page 1 at 150 DPI. Runs in a thread pool."""
+    try:
+        pre_key = cache_key(raw, {"page": 1, "dpi": 150}, kind="pre-render")
+        if _cache.get(pre_key) is None:
+            pre_png = render_page(raw, 1, dpi=150, ocg_on=[], ocg_off=[], simulate_overprint=True)
+            _cache.set(pre_key, pre_png)
+    except Exception:
+        pass
 
 
 async def _extract_impl(
@@ -697,26 +697,14 @@ async def _extract_impl(
         raw = await _read_extract_pdf(request, pdf)
         sha = hashlib.sha256(raw).hexdigest()
         _blob_store.put(sha, raw)
-        payload = _run_extract(raw)
+        loop = asyncio.get_event_loop()
+        payload = await loop.run_in_executor(None, _run_extract, raw)
         # Surface the cache key so clients can switch to hash-based
         # render calls without re-uploading on every interaction.
         if isinstance(payload, dict):
             payload["pdf_sha256"] = sha
-            # Phase C: pre-render page 1 at 150 DPI and embed in response so
-            # the first viewer render can skip a round-trip.
-            try:
-                pre_key = cache_key(raw, {"page": 1, "dpi": 150}, kind="pre-render")
-                pre_png = _cache.get(pre_key)
-                if pre_png is None:
-                    pre_png = render_page(
-                        raw, 1, dpi=150, ocg_on=[], ocg_off=[], simulate_overprint=True
-                    )
-                    _cache.set(pre_key, pre_png)
-                payload["pre_rendered"] = {
-                    "page_1_dpi_150": base64.b64encode(pre_png).decode("ascii")
-                }
-            except Exception:
-                pass  # never fail extract because of pre-render
+        # Warm the page-1 render cache in the background — don't block the response.
+        asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw))
         _record(endpoint_label, 200, time.perf_counter() - started)
         return JSONResponse(payload)
     except HTTPException as exc:

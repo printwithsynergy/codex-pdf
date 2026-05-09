@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, Future
 from pathlib import Path
 
 from codex_pdf.models.v1 import CodexDocument, CodexInfoDict, CodexSourceRef, CodexXmpPacket
@@ -66,11 +67,28 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
         # Fall back to skeleton with minimal metadata.
         pass
 
-    # Structural fallback extraction not exposed through PyMuPDF APIs.
-    output_intents, color_spaces = extract_color_world_pikepdf(pdf_bytes)
-    ocgs = extract_ocgs_pikepdf(pdf_bytes)
-    form_xobjects = extract_forms_pikepdf(pdf_bytes)
-    analysis = extract_analysis_signals_pikepdf(pdf_bytes)
+    # Run the four independent pikepdf extractors concurrently.
+    with ThreadPoolExecutor(max_workers=4) as _pool:
+        _f_color: Future = _pool.submit(extract_color_world_pikepdf, pdf_bytes)
+        _f_ocgs: Future = _pool.submit(extract_ocgs_pikepdf, pdf_bytes)
+        _f_forms: Future = _pool.submit(extract_forms_pikepdf, pdf_bytes)
+        _f_signals: Future = _pool.submit(extract_analysis_signals_pikepdf, pdf_bytes)
+        try:
+            output_intents, color_spaces = _f_color.result()
+        except Exception:
+            output_intents, color_spaces = [], []
+        try:
+            ocgs = _f_ocgs.result()
+        except Exception:
+            ocgs = []
+        try:
+            form_xobjects = _f_forms.result()
+        except Exception:
+            form_xobjects = []
+        try:
+            analysis = _f_signals.result()
+        except Exception:
+            analysis = {}
     trap_evidence = extract_trap_evidence(
         trapped_flag=trapped_flag,
         ocg_names=[x.name for x in ocgs],
