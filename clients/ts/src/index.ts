@@ -492,15 +492,6 @@ export class HttpClient {
         fd.set(k, String(v));
       }
     }
-    if (
-      typeof pdf === "object" &&
-      pdf !== null &&
-      "sha256" in pdf &&
-      typeof (pdf as { sha256?: unknown }).sha256 === "string"
-    ) {
-      fd.set("pdf_sha256", (pdf as { sha256: string }).sha256);
-      return fd;
-    }
     let blob: Blob;
     if (pdf instanceof Blob) {
       blob = pdf;
@@ -510,8 +501,12 @@ export class HttpClient {
       const ab = new ArrayBuffer(pdf.byteLength);
       new Uint8Array(ab).set(pdf);
       blob = new Blob([ab], { type: "application/pdf" });
-    } else {
+    } else if (pdf instanceof ArrayBuffer) {
       blob = new Blob([pdf], { type: "application/pdf" });
+    } else {
+      // Hash-only ref — server resolves bytes from its blob cache.
+      fd.set("pdf_sha256", pdf.sha256);
+      return fd;
     }
     fd.set("pdf", blob, filename);
     return fd;
