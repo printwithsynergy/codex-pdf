@@ -122,11 +122,14 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
 
 
 def extract_document_fast(pdf_bytes: bytes, *, source_uri: str | None = None) -> CodexDocument:
-    """PyMuPDF-only extraction — returns page dimensions and structure in ~200ms.
+    """Fast extract for Phase 1 streaming: PyMuPDF structure + parallel pikepdf colors/layers.
 
-    ocgs, color_spaces, output_intents, form_xobjects, and analysis are empty.
-    Intended as Phase 1 in a two-phase streaming extract; call extract_document()
-    for the full result with spot colors, signals, and layer data.
+    Includes: pages (with real dimensions), fonts, images, annotations,
+    output_intents, color_spaces, ocgs, and form_xobjects.
+
+    Excludes: analysis signals (content_ops). Those are expensive and only
+    needed for preflight lint checks — call extract_document() for the full
+    result (Phase 2). This phase runs in ~400-700ms vs ~5-8s for full extract.
     """
     digest = hashlib.sha256(pdf_bytes).hexdigest()
     pages = []
@@ -159,9 +162,34 @@ def extract_document_fast(pdf_bytes: bytes, *, source_uri: str | None = None) ->
     except Exception:
         pass
 
+    # Run color world, OCG and form extraction concurrently — these are
+    # independent pikepdf passes and give loupe all the data it needs for
+    # spot color tools and layer panels.  analysis signals are intentionally
+    # skipped here; Phase 2 (extract_document) adds them for lint-pdf.
+    output_intents: list = []
+    color_spaces: list = []
+    ocgs: list = []
+    form_xobjects: list = []
+    with ThreadPoolExecutor(max_workers=3) as _pool:
+        _f_color: Future = _pool.submit(extract_color_world_pikepdf, pdf_bytes)
+        _f_ocgs: Future = _pool.submit(extract_ocgs_pikepdf, pdf_bytes)
+        _f_forms: Future = _pool.submit(extract_forms_pikepdf, pdf_bytes)
+        try:
+            output_intents, color_spaces = _f_color.result()
+        except Exception:
+            pass
+        try:
+            ocgs = _f_ocgs.result()
+        except Exception:
+            pass
+        try:
+            form_xobjects = _f_forms.result()
+        except Exception:
+            pass
+
     trap_evidence = extract_trap_evidence(
         trapped_flag=trapped_flag,
-        ocg_names=[],
+        ocg_names=[x.name for x in ocgs],
         annotation_subtypes=[x.subtype or "" for x in annotations],
     )
 
@@ -176,12 +204,12 @@ def extract_document_fast(pdf_bytes: bytes, *, source_uri: str | None = None) ->
         info=info,
         xmp=xmp,
         trapped_flag=trapped_flag,
-        output_intents=[],
-        color_spaces=[],
+        output_intents=output_intents,
+        color_spaces=color_spaces,
         fonts=fonts,
         images=images,
-        ocgs=[],
-        form_xobjects=[],
+        ocgs=ocgs,
+        form_xobjects=form_xobjects,
         analysis={},
         trap_evidence=trap_evidence,
         annotations=annotations,
