@@ -88,6 +88,10 @@ export type PdfRef =
  */
 export interface ExtractResponse {
   readonly pdf_sha256: string;
+  /** §16.3: PDF linearization flag (fast web view). */
+  readonly is_linearized?: boolean;
+  /** §16 Phase C: pre-rendered page 1 at 150 DPI, keyed by render spec. */
+  readonly pre_rendered?: Record<string, string>;
   readonly [key: string]: unknown;
 }
 
@@ -183,6 +187,35 @@ export interface SpotSwatchResolution {
   pantone_name?: string;
 }
 
+/** §16.1: Spot colorant as returned in CodexDocument.spot_colorants. */
+export interface CodexSpotColorant {
+  name: string;
+  type?: string;
+  rgb?: RgbTriplet;
+  lab?: LabTriplet;
+  cmyk?: CmykQuad;
+  pantone_name?: string;
+  /** Neutral density computed from Lab (§16.1). */
+  neutral_density?: number | null;
+  neutral_density_source?: "measured" | "computed_from_lab" | "estimated" | null;
+  [key: string]: unknown;
+}
+
+export interface NeutralDensityInput {
+  /** Spot ink name (resolved via spot-color ladder). */
+  name?: string;
+  /** CIE Lab D50 triple. */
+  lab?: LabTriplet;
+  /** CMYK quad (0–100). */
+  cmyk?: CmykQuad;
+}
+
+export interface NeutralDensityResult {
+  schema_version: string;
+  neutral_density: number;
+  source: "measured" | "computed_from_lab" | "estimated";
+}
+
 export interface ResolveSpotInput {
   name: string;
   hostOverride?: SpotInkOverride;
@@ -265,15 +298,54 @@ export interface GeomTileInput {
   gutterY?: number;
   marksZone?: GeomMarksZone;
   origin?: "bottom-left" | "top-left";
+  /** §16.2: Uniform rotation applied to every cell (degrees). */
+  cellRotation?: number;
+  /** §16.2: Per-cell rotation pattern (rows × cols). Overrides cellRotation. */
+  cellRotationPattern?: number[][];
+  /** §16.2: Alternate flip_h on every odd row. */
+  flipPerRow?: boolean;
+  /** §16.2: Per-cell flip_h pattern (rows × cols). Overrides flipPerRow. */
+  flipPattern?: boolean[][];
+  /** §16.2: How to handle bleed regions: "none" | "trim" | "extend". */
+  bleedHandling?: "none" | "trim" | "extend";
+  /** §16.2: Bleed amount in points. */
+  bleed?: number;
+}
+
+/** §16.2: A single tile cell with placement attributes. */
+export interface CellPlacement {
+  box: [number, number, number, number];
+  rotation: number;
+  flip_h: boolean;
+  flip_v: boolean;
+  row: number;
+  col: number;
 }
 
 export interface GeomTileResult {
   schema_version: string;
   rows: number;
   cols: number;
+  /** Backward-compatible flat [x0,y0,x1,y1] boxes. */
   cells: [number, number, number, number][];
+  /** §16.2: Full placement data with rotation/flip/row/col. */
+  placements: CellPlacement[];
   used: [number, number, number, number];
   waste: [number, number, number, number];
+}
+
+export interface GeomOffsetInput {
+  path: GeomPath;
+  /** Offset distance in points. Positive = spread, negative = choke. */
+  distancePt: number;
+  joinType?: "miter" | "round" | "square";
+  endType?: "polygon" | "joined_round" | "joined_square" | "butt" | "square" | "round";
+  miterLimit?: number;
+}
+
+export interface GeomOffsetResult {
+  schema_version: string;
+  rings: [number, number][][];
 }
 
 export type Polygon = [number, number][];
@@ -514,9 +586,21 @@ export class HttpClient {
 
   // ----------------------- meta ---------------------------------
 
-  async healthz(): Promise<{ status: string; version: string; ghostscript: boolean }> {
+  async healthz(): Promise<{
+    status: string;
+    version: string;
+    ghostscript: boolean;
+    cache_backend: string;
+    instance_id?: string | null;
+  }> {
     const res = await this.get("/v1/healthz");
-    return (await res.json()) as { status: string; version: string; ghostscript: boolean };
+    return (await res.json()) as {
+      status: string;
+      version: string;
+      ghostscript: boolean;
+      cache_backend: string;
+      instance_id?: string | null;
+    };
   }
 
   async version(): Promise<string> {
@@ -900,6 +984,28 @@ export class HttpClient {
   }
 
   /**
+   * §16.1: Compute neutral density for a spot colorant.
+   *
+   * Accepts a spot name (resolved via the spot-color ladder), a Lab
+   * D50 triple, or a CMYK quad. Lab is most accurate; CMYK uses
+   * naïve linearisation.
+   */
+  async neutralDensity(input: NeutralDensityInput): Promise<NeutralDensityResult> {
+    const body = JSON.stringify({
+      name: input.name,
+      lab: input.lab,
+      cmyk: input.cmyk,
+    });
+    const res = await this.post(
+      "/v1/color/neutral-density",
+      body,
+      "application/json",
+      "application/json",
+    );
+    return (await res.json()) as NeutralDensityResult;
+  }
+
+  /**
    * Fetch the bundled inkbook (curated + Pantone catalogue).
    */
   async getInkbook(libraries?: string[]): Promise<Inkbook> {
@@ -930,9 +1036,34 @@ export class HttpClient {
         left: input.marksZone?.left ?? 0,
       },
       origin: input.origin ?? "bottom-left",
+      cell_rotation: input.cellRotation ?? 0,
+      cell_rotation_pattern: input.cellRotationPattern ?? null,
+      flip_per_row: input.flipPerRow ?? false,
+      flip_pattern: input.flipPattern ?? null,
+      bleed_handling: input.bleedHandling ?? "none",
+      bleed: input.bleed ?? 0,
     });
     const res = await this.post("/v1/geom/tile", body, "application/json", "application/json");
     return (await res.json()) as GeomTileResult;
+  }
+
+  /**
+   * §16.2: Offset (spread/choke) a polygon path.
+   *
+   * Positive `distancePt` spreads (grows); negative chokes (shrinks).
+   * Uses pyclipr (Clipper2) on the server when available; rectangle
+   * fast-path otherwise.
+   */
+  async geomOffset(input: GeomOffsetInput): Promise<GeomOffsetResult> {
+    const body = JSON.stringify({
+      path: input.path,
+      distance_pt: input.distancePt,
+      join_type: input.joinType ?? "miter",
+      end_type: input.endType ?? "polygon",
+      miter_limit: input.miterLimit ?? 2.0,
+    });
+    const res = await this.post("/v1/geom/offset", body, "application/json", "application/json");
+    return (await res.json()) as GeomOffsetResult;
   }
 
   async geomIntersect(input: GeomBooleanInput): Promise<GeomBooleanResult> {
