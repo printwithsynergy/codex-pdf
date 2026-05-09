@@ -17,6 +17,8 @@ from typing import Any
 
 import pytest
 
+from codex_pdf.version import VERSION
+
 from codex_pdf.api.cache import (
     MemoryCache,
     RedisCache,
@@ -33,6 +35,7 @@ def test_cache_key_is_content_addressed() -> None:
     assert a == b
     assert a != c
     assert a != d
+    assert a.startswith(f"codex:{VERSION}:page:")
 
 
 def test_memory_cache_round_trip() -> None:

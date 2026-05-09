@@ -1,6 +1,8 @@
 """Codex API cache backends.
 
-Content-addressed by ``sha256(pdf) + sha256(args_json)``. Pluggable:
+Content-addressed by ``VERSION + sha256(pdf) + sha256(args_json)``.
+Including ``VERSION`` avoids stale cross-release cache hits when
+operators reuse the same Redis backend across deploys. Pluggable:
 
 - ``memory`` (default) — in-process LRU. Always works, no deps.
 - ``redis`` — set ``CODEX_REDIS_URL=redis://...``. **Optional**: any
@@ -20,6 +22,8 @@ import os
 from collections import OrderedDict
 from typing import Any
 
+from codex_pdf.version import VERSION
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +38,7 @@ def cache_key(pdf_bytes: bytes, args: dict[str, Any], *, kind: str) -> str:
     pdf_sha = hashlib.sha256(pdf_bytes).hexdigest()
     args_blob = json.dumps(args, sort_keys=True, separators=(",", ":")).encode("utf-8")
     args_sha = hashlib.sha256(args_blob).hexdigest()
-    return f"codex:{kind}:{pdf_sha}:{args_sha}"
+    return f"codex:{VERSION}:{kind}:{pdf_sha}:{args_sha}"
 
 
 class MemoryCache:

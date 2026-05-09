@@ -65,7 +65,7 @@ wheels = [
 
 [[package]]
 name = "codex-pdf"
-version = "1.4.3"
+version = "1.4.5"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
