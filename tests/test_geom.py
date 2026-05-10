@@ -20,6 +20,7 @@ from codex_pdf.geom import (
     mm_to_pt,
     polygon_difference,
     polygon_intersect,
+    polygon_offset,
     polygon_union,
     pt_to_in,
     pt_to_mm,
@@ -135,6 +136,31 @@ def test_polygon_intersect_triangles_via_clipper() -> None:
     rect = Path.from_box(Box(25.0, 0.0, 75.0, 50.0))
     out = polygon_intersect(triangle, rect)
     assert len(out.rings) >= 1
+
+
+@pytest.mark.skipif(not HAS_PYCLIPR, reason="pyclipr is required for polygon offset")
+def test_polygon_offset_triangle_spread_and_choke() -> None:
+    """Regression for pyclipr 0.1.8 ClipperOffset kwarg removal.
+
+    Pre-fix this raised ``TypeError: __init__(): incompatible constructor
+    arguments`` because ``ClipperOffset(miterLimit=...)`` is no longer
+    accepted — the miter limit moved to a property set after construction.
+    Rectangular paths bypassed pyclipr entirely (rect fast-path), so the
+    bug was invisible without a triangle / pentagon exercise.
+    """
+    triangle = Path.from_polygons([[(0.0, 0.0), (100.0, 0.0), (50.0, 100.0)]])
+
+    spread = polygon_offset(triangle, 10.0)
+    assert len(spread.rings) == 1
+    sb = spread.bbox()
+    assert sb.x0 < 0.0 and sb.y0 < 0.0
+    assert sb.x1 > 100.0 and sb.y1 > 100.0
+
+    choke = polygon_offset(triangle, -5.0)
+    assert choke.rings
+    cb = choke.bbox()
+    assert cb.x0 > 0.0 and cb.y0 > 0.0
+    assert cb.x1 < 100.0 and cb.y1 < 100.0
 
 
 # ---------------------------------------------------------------------------

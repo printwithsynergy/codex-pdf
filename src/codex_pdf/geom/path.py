@@ -268,7 +268,11 @@ def polygon_offset(
     jt = join_map.get(join_type, pyclipr.JoinType.Miter)  # type: ignore[union-attr]
     et = end_map.get(end_type, pyclipr.EndType.Polygon)  # type: ignore[union-attr]
 
-    po = pyclipr.ClipperOffset(miterLimit=miter_limit)  # type: ignore[union-attr]
+    # pyclipr 0.1.8 dropped the keyword-only ClipperOffset(miterLimit=...)
+    # constructor — only the zero-arg form is accepted; the miter limit is
+    # set via the property afterwards.
+    po = pyclipr.ClipperOffset()  # type: ignore[union-attr]
+    po.miterLimit = miter_limit
     for ring in path.rings:
         scaled = _scale_polygon(ring)
         po.addPath(scaled, jt, et)
