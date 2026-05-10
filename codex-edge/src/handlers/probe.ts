@@ -14,9 +14,13 @@
 
 import type { Env } from "../env";
 import { cacheKey } from "../cache_key";
-import { buildSseEvent, teeAndCache } from "../sse_tee";
+import { buildSseEvent } from "../sse_tee";
 
-export async function handleProbe(req: Request, env: Env): Promise<Response> {
+export async function handleProbe(
+  req: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   // Hash-keyed JSON body lets us check KV before talking to origin.
   const ct = (req.headers.get("content-type") || "").toLowerCase();
   if (ct.includes("application/json")) {
@@ -24,7 +28,7 @@ export async function handleProbe(req: Request, env: Env): Promise<Response> {
     try {
       body = (await req.clone().json()) as { pdf_sha256?: unknown };
     } catch {
-      return proxy(req, env);
+      return proxy(req, env, ctx);
     }
     const sha = typeof body.pdf_sha256 === "string" ? body.pdf_sha256.trim() : "";
     if (sha) {
@@ -32,7 +36,7 @@ export async function handleProbe(req: Request, env: Env): Promise<Response> {
       if (cached) return cached;
     }
   }
-  return proxy(req, env);
+  return proxy(req, env, ctx);
 }
 
 async function tryReplayProbe(env: Env, sha: string): Promise<Response | null> {
@@ -52,7 +56,7 @@ async function tryReplayProbe(env: Env, sha: string): Promise<Response | null> {
   });
 }
 
-async function proxy(req: Request, env: Env): Promise<Response> {
+async function proxy(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   // We need the sha to write to KV after the stream completes. For
   // the JSON-body path we already saw it; for multipart we'd have to
   // hash the upload, which is expensive — for now, multipart bypasses
@@ -82,21 +86,7 @@ async function proxy(req: Request, env: Env): Promise<Response> {
 
   const minKey = await cacheKey(sha, {}, "probe-min", env.CODEX_VERSION);
   const stdKey = await cacheKey(sha, {}, "probe-std", env.CODEX_VERSION);
-  const teed = teeAndCache(upstream.body, {
-    kv: env.CACHE,
-    routes: {
-      // The default event ("") is what FastAPI emits — both probe
-      // events arrive as bare `data:` frames, so we route them by
-      // appearance order via two write-through entries: first frame
-      // = min, second = std. Implementations that need stricter
-      // routing should switch the origin to named events.
-      "": { key: "<unused>", ttl: 0 },
-    },
-  });
-
-  // Capture by frame index instead of event name for the bare-data
-  // probe stream. Wrap the tee with an order-aware capturer.
-  return new Response(orderedProbeCache(teed, env, minKey, stdKey), {
+  return new Response(orderedProbeCache(upstream.body, env, ctx, minKey, stdKey), {
     status: upstream.status,
     headers: {
       "Content-Type": "text/event-stream",
@@ -109,6 +99,7 @@ async function proxy(req: Request, env: Env): Promise<Response> {
 function orderedProbeCache(
   body: ReadableStream<Uint8Array>,
   env: Env,
+  ctx: ExecutionContext,
   minKey: string,
   stdKey: string,
 ): ReadableStream<Uint8Array> {
@@ -139,7 +130,13 @@ function orderedProbeCache(
         const payload = dataLines.join("\n");
         const target = frameIndex === 0 ? minKey : frameIndex === 1 ? stdKey : null;
         if (target) {
-          env.CACHE.put(target, payload, { expirationTtl: probeTtl }).catch(() => {});
+          // ctx.waitUntil keeps the Worker alive long enough for the
+          // KV write to land — without this, the Worker is killed as
+          // soon as the response stream closes and the second event's
+          // put silently aborts.
+          ctx.waitUntil(
+            env.CACHE.put(target, payload, { expirationTtl: probeTtl }).catch(() => {}),
+          );
         }
         frameIndex += 1;
       }

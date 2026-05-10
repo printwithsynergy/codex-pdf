@@ -21,7 +21,7 @@ import { handleProbe } from "./handlers/probe";
 import { handleExtractStream } from "./handlers/extract";
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
 
     if (req.method === "GET" && url.pathname === "/edge/healthz") {
@@ -29,8 +29,8 @@ export default {
     }
 
     if (req.method === "POST") {
-      if (url.pathname === "/v1/probe") return handleProbe(req, env);
-      if (url.pathname === "/v1/extract/stream") return handleExtractStream(req, env);
+      if (url.pathname === "/v1/probe") return handleProbe(req, env, ctx);
+      if (url.pathname === "/v1/extract/stream") return handleExtractStream(req, env, ctx);
     }
 
     // Anything else just proxies to origin so the edge worker is a
