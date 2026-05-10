@@ -20,7 +20,9 @@ mode for examples.
 | `GET /v1/version` | meta | render | bare `{version}` |
 | `GET /v1/contract` | meta | render | endpoint inventory + `section_schema_versions` |
 | `GET /v1/schema/{name}` | document | extract | JSON schemas served from `schemas/v1/<name>.schema.json` |
-| `POST /v1/extract`, `POST /extract` | document | extract | multipart PDF or JSON `{url}` → CodexDocument |
+| `POST /v1/extract`, `POST /extract` | document | extract | multipart PDF or JSON `{url, pdf_sha256}` → CodexDocument |
+| `POST /v1/probe` | document | extract | two-event SSE stream: `probe-min` (instant) + `probe-std` (after secondary parse) |
+| `POST /v1/extract/stream` | document | extract | SSE stream of `phase-1` + `phase-2` extract events; `?granular=1` adds per-section progress |
 | `POST /v1/render/page` | document | render | PNG raster |
 | `POST /v1/render/separations` | document | render | tiffsep channel manifest |
 | `POST /v1/render/heatmap` | document | render | TAC heatmap PNG + per-run header |
@@ -56,10 +58,10 @@ Sample contract response:
 ```json
 {
   "contract_name": "codex-document",
-  "schema_version": "1.0.0",
-  "package_version": "1.4.0",
+  "schema_version": "1.1.0",
+  "package_version": "1.7.0",
   "schema_id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
-  "endpoints": ["POST /v1/extract", "..."],
+  "endpoints": ["POST /v1/extract", "POST /v1/probe", "POST /v1/extract/stream", "..."],
   "section_schema_versions": {
     "color": "1.0.0",
     "geom": "1.0.0"
@@ -104,6 +106,4 @@ status changes commit-by-commit.
 
 Any future need to write PDF bytes goes into a separate Forge
 service (rewrite, marks, impose, trap), never into a consumer.
-Codex stays read-only; consumers stay byte-level-clean. Refer to
-`/Users/macadmin/Code/printwithsynergy/FORGE-DESIGN-PROMPT.md` for
-the next-session Q&A that defines the Forge contract.
+Codex stays read-only; consumers stay byte-level-clean.
