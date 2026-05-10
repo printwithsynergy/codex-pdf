@@ -98,6 +98,26 @@ class RedisBlobStore:
                 sha256[:16],
                 exc_info=True,
             )
+            return
+        # Hand the sha to codex-speculator so Phase 2 is warm by the
+        # time the client follows up with /v1/extract. Best-effort —
+        # any failure (no consumer attached, stream pruned, write
+        # timeout) is logged and swallowed. A 60 s SET-NX dedupe key
+        # collapses repeated puts for the same sha into a single XADD.
+        try:
+            if self._client.set(
+                f"codex:speculate:dedupe:{sha256}", "blob_put", ex=60, nx=True
+            ):
+                self._client.xadd(
+                    "codex:speculate",
+                    {"sha": sha256, "source": "blob_put"},
+                    maxlen=10000,
+                    approximate=True,
+                )
+        except Exception:
+            logger.debug(
+                "speculate publish failed for %s on blob put", sha256[:16], exc_info=True
+            )
 
     def get(self, sha256: str) -> bytes | None:
         try:

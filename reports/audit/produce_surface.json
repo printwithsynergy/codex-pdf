@@ -36,6 +36,7 @@
     "codex_pdf.extract.forms",
     "codex_pdf.extract.images",
     "codex_pdf.extract.ocg",
+    "codex_pdf.extract.probe",
     "codex_pdf.extract.signals",
     "codex_pdf.extract.structure",
     "codex_pdf.extract.transparency",

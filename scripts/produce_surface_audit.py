@@ -95,6 +95,7 @@ PIKEPDF_PYMUPDF_READ_ALLOWLIST: frozenset[str] = frozenset(
         "codex_pdf.extract.content_inventory",
         "codex_pdf.extract.document",
         "codex_pdf.extract.fonts",
+        "codex_pdf.extract.probe",
         "codex_pdf.extract.forms",
         "codex_pdf.extract.images",
         "codex_pdf.extract.ocg",

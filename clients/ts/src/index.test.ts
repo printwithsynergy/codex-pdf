@@ -181,6 +181,71 @@ describe("HttpClient", () => {
     expect(result.cells.length).toBeGreaterThan(0);
   });
 
+  it("probeStream fires onMin then onStd in order", async () => {
+    const sse = [
+      `data: {"probe_phase":1,"pdf_sha256":"a","page_count":1,"first_page_dims":{"width_pts":72,"height_pts":72,"rotation":0},"encrypted":false}\n\n`,
+      `data: {"probe_phase":2,"pdf_sha256":"a","page_count":1,"page_dims":[{"width_pts":72,"height_pts":72,"rotation":0}],"info":{},"pdf_version":"1.7","encrypted":false}\n\n`,
+    ].join("");
+    const fakeFetch: typeof fetch = async () =>
+      new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const events: string[] = [];
+    await client.probeStream(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+      onMin: (ev) => {
+        events.push("min");
+        expect(ev.page_count).toBe(1);
+      },
+      onStd: (ev) => {
+        events.push("std");
+        expect(ev.page_dims.length).toBe(1);
+      },
+    });
+    expect(events).toEqual(["min", "std"]);
+  });
+
+  it("extractStream non-granular emits phase1 then phase2", async () => {
+    const sse =
+      `data: {"extract_phase":1,"pdf_sha256":"a","pages":[]}\n\n` +
+      `data: {"extract_phase":2,"pdf_sha256":"a","pages":[{"page_num":1}]}\n\n`;
+    const fakeFetch: typeof fetch = async () =>
+      new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const order: string[] = [];
+    const final = await client.extractStream(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+      onPhase1: () => order.push("phase1"),
+      onPhase2: () => order.push("phase2"),
+    });
+    expect(order).toEqual(["phase1", "phase2"]);
+    expect((final as { pages: unknown[] }).pages).toHaveLength(1);
+  });
+
+  it("extractStream granular dispatches all five named events", async () => {
+    const sse =
+      `event: phase1\ndata: {"pdf_sha256":"a","pages":[]}\n\n` +
+      `event: color_world\ndata: {"output_intents":[],"color_spaces":[]}\n\n` +
+      `event: ocgs\ndata: {"ocgs":[]}\n\n` +
+      `event: form_xobjects\ndata: {"form_xobjects":[]}\n\n` +
+      `event: analysis\ndata: {"analysis":{"content_ops":0}}\n\n` +
+      `event: phase2_complete\ndata: {"pdf_sha256":"a","pages":[{"page_num":1}],"analysis":{"content_ops":0}}\n\n`;
+    const fakeFetch: typeof fetch = async (url) => {
+      expect(String(url)).toContain("granular=1");
+      return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    };
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const seen: string[] = [];
+    const final = await client.extractStream(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+      granular: true,
+      onPhase1: () => seen.push("phase1"),
+      onColorWorld: () => seen.push("color_world"),
+      onOcgs: () => seen.push("ocgs"),
+      onFormXObjects: () => seen.push("form_xobjects"),
+      onAnalysis: () => seen.push("analysis"),
+      onPhase2: () => seen.push("phase2_complete"),
+    });
+    expect(seen).toEqual(["phase1", "color_world", "ocgs", "form_xobjects", "analysis", "phase2_complete"]);
+    expect((final as { pages: unknown[] }).pages).toHaveLength(1);
+  });
+
   it("parses heatmap header runs", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const fakeFetch: typeof fetch = async () =>

@@ -1,0 +1,44 @@
+# Codex speculator sidecar — Railway service config.
+#
+# Same Docker image as codex-pdf (so render/extract code stays
+# byte-identical). This service has no public ingress; it only reads
+# from the shared Redis Stream `codex:speculate` and writes Phase 1 +
+# Phase 2 results into the same `codex:VERSION:extract*` cache keys
+# the API consumes.
+#
+# Provision in Railway as a second service in the same project, point
+# `Root Directory` at this file, and set `CODEX_REDIS_URL` to the same
+# value as the API service.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python -m codex_pdf.speculator"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+numReplicas = 1
+sleepApplication = false
+
+# Required env vars (set per environment in the Railway dashboard or
+# via `railway variables`):
+#
+#   CODEX_REDIS_URL  Redis connection URL (must match the API
+#                    service so the speculator reads the same blob
+#                    store and writes to the same extract cache).
+#
+# Optional:
+#
+#   CODEX_LOG_LEVEL  defaults to INFO. Set to DEBUG to see per-sha
+#                    skip-cache-hit and blob-missing decisions.
+#
+# Operational notes:
+#   - This service is purely opportunistic. If you stop it, the API
+#     still works at unchanged latency; you only lose the pre-warm.
+#   - Stream `codex:speculate` is auto-trimmed to MAXLEN ~10000 by
+#     the publisher, so memory growth is bounded even under bursts.
+#   - One replica is enough for most volumes — speculator processes
+#     one PDF at a time and dedupe collapses repeats. Add a second
+#     replica + a Redis consumer group only when XLEN consistently
+#     exceeds 1000.

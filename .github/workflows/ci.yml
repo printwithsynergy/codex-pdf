@@ -12,9 +12,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Checkout lint-pdf fixtures
         uses: actions/checkout@v4
+        continue-on-error: true
         with:
           repository: printwithsynergy/lint-pdf
-          path: ../lint-pdf
+          path: lint-pdf
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

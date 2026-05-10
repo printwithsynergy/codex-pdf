@@ -81,6 +81,53 @@ export type PdfRef =
   | { readonly sha256: string };
 
 /**
+ * First event from `probeStream` — bare-minimum facts, target
+ * latency <50 ms cold / <10 ms warm.
+ *
+ * @public
+ */
+export interface ProbeMinEvent {
+  readonly probe_phase: 1;
+  readonly pdf_sha256: string;
+  readonly page_count: number;
+  readonly first_page_dims: { width_pts: number; height_pts: number; rotation: number } | null;
+  readonly encrypted: boolean;
+}
+
+/**
+ * Second event from `probeStream` — full page-dim list + info subset,
+ * target latency <150 ms.
+ *
+ * @public
+ */
+export interface ProbeStdEvent {
+  readonly probe_phase: 2;
+  readonly pdf_sha256: string;
+  readonly page_count: number;
+  readonly page_dims: ReadonlyArray<{ width_pts: number; height_pts: number; rotation: number }>;
+  readonly info: Record<string, string>;
+  readonly pdf_version: string;
+  readonly encrypted: boolean;
+}
+
+/**
+ * Callbacks for `extractStream`. All are optional. When `granular`
+ * is true the server splits Phase 2 into four named events; otherwise
+ * only `onPhase1` and `onPhase2` fire.
+ *
+ * @public
+ */
+export interface ExtractStreamCallbacks {
+  granular?: boolean;
+  onPhase1?: (doc: ExtractResponse) => void;
+  onPhase2?: (doc: ExtractResponse) => void;
+  onColorWorld?: (data: Record<string, unknown>) => void;
+  onOcgs?: (data: Record<string, unknown>) => void;
+  onFormXObjects?: (data: Record<string, unknown>) => void;
+  onAnalysis?: (data: Record<string, unknown>) => void;
+}
+
+/**
  * Response from ``extract()`` — the parsed CodexDocument plus the
  * sha256 the server cached the PDF under, for hash-only follow-ups.
  *
@@ -376,6 +423,48 @@ function envBool(name: string, dflt = false): boolean {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_RETRIES = 3;
+
+interface SseEvent {
+  event: string; // "" when the server omitted the event: line
+  data: unknown;
+}
+
+/**
+ * Async-iterate `data:`/`event:` SSE frames from a Response body.
+ * Only the JSON `data:` payload is surfaced — comments (`:`), `id:`
+ * and `retry:` lines are ignored. Multi-line `data:` is concatenated
+ * with newlines per the SSE spec.
+ */
+async function* parseSseStream(res: Response): AsyncGenerator<SseEvent> {
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder("utf-8");
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, nl);
+      buf = buf.slice(nl + 2);
+      let event = "";
+      const dataLines: string[] = [];
+      for (const line of block.split("\n")) {
+        if (!line || line.startsWith(":")) continue;
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (dataLines.length === 0) continue;
+      const raw = dataLines.join("\n");
+      try {
+        yield { event, data: JSON.parse(raw) };
+      } catch {
+        // Skip malformed JSON frames silently.
+      }
+    }
+  }
+}
 
 /**
  * Codex client. Construct once and reuse. Each method either
@@ -792,6 +881,114 @@ export class HttpClient {
     const fd = this.buildForm(pdf, {});
     const res = await this.post("/v1/extract", fd);
     return (await res.json()) as ExtractResponse;
+  }
+
+  /**
+   * Two-event probe SSE stream — page count + dims arrive in <50 ms,
+   * full page-dim list + info in <150 ms.
+   *
+   * Both callbacks fire at most once. Resolves when the server closes
+   * the stream. PDF can be raw bytes or `{ sha256 }` to reuse a
+   * server-side blob.
+   *
+   * @public
+   */
+  async probeStream(
+    pdf: PdfRef,
+    callbacks: {
+      onMin?: (event: ProbeMinEvent) => void;
+      onStd?: (event: ProbeStdEvent) => void;
+    } = {},
+  ): Promise<void> {
+    const init = this.buildSseRequest(pdf);
+    const res = await this.post("/v1/probe", init.body, "text/event-stream", init.contentType);
+    for await (const ev of parseSseStream(res)) {
+      const data = ev.data as { probe_phase?: number };
+      if (data?.probe_phase === 1) callbacks.onMin?.(data as ProbeMinEvent);
+      else if (data?.probe_phase === 2) callbacks.onStd?.(data as ProbeStdEvent);
+    }
+  }
+
+  /**
+   * Streaming extract. Default mode emits Phase 1 then Phase 2 (full
+   * doc) — equivalent to the old behaviour. With `granular: true` the
+   * server emits five named events: `phase1`, `color_world`, `ocgs`,
+   * `form_xobjects`, `analysis`, `phase2_complete` (in completion
+   * order for the four pikepdf passes).
+   *
+   * Resolves with the merged final document on success.
+   *
+   * @public
+   */
+  async extractStream(
+    pdf: PdfRef,
+    callbacks: ExtractStreamCallbacks = {},
+  ): Promise<ExtractResponse> {
+    const granular = callbacks.granular === true;
+    const path = granular ? "/v1/extract/stream?granular=1" : "/v1/extract/stream";
+    const init = this.buildSseRequest(pdf);
+    const res = await this.post(path, init.body, "text/event-stream", init.contentType);
+
+    let final: ExtractResponse | undefined;
+    for await (const ev of parseSseStream(res)) {
+      const data = ev.data as Record<string, unknown>;
+      if (granular) {
+        switch (ev.event) {
+          case "phase1":
+            callbacks.onPhase1?.(data as ExtractResponse);
+            break;
+          case "color_world":
+            callbacks.onColorWorld?.(data);
+            break;
+          case "ocgs":
+            callbacks.onOcgs?.(data);
+            break;
+          case "form_xobjects":
+            callbacks.onFormXObjects?.(data);
+            break;
+          case "analysis":
+            callbacks.onAnalysis?.(data);
+            break;
+          case "phase2_complete":
+            final = data as ExtractResponse;
+            callbacks.onPhase2?.(final);
+            break;
+          default:
+            break;
+        }
+      } else {
+        const phase = (data as { extract_phase?: number }).extract_phase;
+        if (phase === 1) {
+          callbacks.onPhase1?.(data as ExtractResponse);
+        } else if (phase === 2) {
+          final = data as ExtractResponse;
+          callbacks.onPhase2?.(final);
+        }
+      }
+    }
+    if (!final) {
+      throw new CodexClientError("extract stream ended without phase2_complete", {
+        status: -1,
+      });
+    }
+    return final;
+  }
+
+  /**
+   * Build a body for SSE endpoints. Multipart upload when given raw
+   * bytes; JSON `{pdf_sha256}` when given a hash ref. The probe and
+   * extract-stream endpoints both accept either form.
+   */
+  private buildSseRequest(pdf: PdfRef): { body: BodyInit; contentType?: string } {
+    if (
+      typeof (pdf as { sha256?: unknown }).sha256 === "string"
+    ) {
+      return {
+        body: JSON.stringify({ pdf_sha256: (pdf as { sha256: string }).sha256 }),
+        contentType: "application/json",
+      };
+    }
+    return { body: this.buildForm(pdf, {}) };
   }
 
   // ----------------------- render -------------------------------

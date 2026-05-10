@@ -104,6 +104,80 @@ def test_extract_stream_emits_two_phases(client: TestClient) -> None:
     assert isinstance(p2.get("ocgs"), list)
 
 
+def test_probe_emits_two_events(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/probe",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+    events = [
+        json.loads(line[len("data: "):])
+        for line in resp.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert len(events) == 2
+    ev1, ev2 = events
+    assert ev1["probe_phase"] == 1
+    assert ev2["probe_phase"] == 2
+    assert ev1["page_count"] == ev2["page_count"]
+    assert ev1["page_count"] >= 1
+    assert "first_page_dims" in ev1
+    assert isinstance(ev2.get("page_dims"), list)
+    assert len(ev2["page_dims"]) == ev2["page_count"]
+    assert ev1["pdf_sha256"] == ev2["pdf_sha256"]
+
+
+def test_probe_resolves_sha_from_blob_store(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    # First call uploads + caches the blob.
+    first = client.post(
+        "/v1/probe",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert first.status_code == 200
+    sha = next(
+        json.loads(line[len("data: "):])["pdf_sha256"]
+        for line in first.text.splitlines()
+        if line.startswith("data: ")
+    )
+    # Second call references the cached sha — no re-upload.
+    second = client.post("/v1/probe", json={"pdf_sha256": sha})
+    assert second.status_code == 200, second.text
+    events = [
+        json.loads(line[len("data: "):])
+        for line in second.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert len(events) == 2
+    assert events[0]["pdf_sha256"] == sha
+
+
+def test_probe_rejects_unknown_sha(client: TestClient) -> None:
+    resp = client.post("/v1/probe", json={"pdf_sha256": "0" * 64})
+    assert resp.status_code == 412
+
+
+def test_extract_stream_granular_events(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract/stream?granular=1",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    # Granular mode emits ``event: <name>\n`` lines alongside data:.
+    event_names = [
+        line[len("event: "):]
+        for line in resp.text.splitlines()
+        if line.startswith("event: ")
+    ]
+    assert event_names[0] == "phase1"
+    assert event_names[-1] == "phase2_complete"
+    middle = set(event_names[1:-1])
+    assert middle == {"color_world", "ocgs", "form_xobjects", "analysis"}
+
+
 def test_walk_content_stream_returns_signals(client: TestClient) -> None:
     pdf_bytes = PDF_PATH.read_bytes()
     resp = client.post(
