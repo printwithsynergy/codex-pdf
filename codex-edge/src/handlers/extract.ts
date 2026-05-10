@@ -16,7 +16,11 @@ import type { Env } from "../env";
 import { cacheKey } from "../cache_key";
 import { buildSseEvent } from "../sse_tee";
 
-export async function handleExtractStream(req: Request, env: Env): Promise<Response> {
+export async function handleExtractStream(
+  req: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const url = new URL(req.url);
   const granular = url.searchParams.get("granular") === "1";
   const ct = (req.headers.get("content-type") || "").toLowerCase();
@@ -26,16 +30,16 @@ export async function handleExtractStream(req: Request, env: Env): Promise<Respo
     try {
       body = (await req.clone().json()) as { pdf_sha256?: unknown };
     } catch {
-      return proxy(req, env, granular, null);
+      return proxy(req, env, ctx, granular, null);
     }
     const sha = typeof body.pdf_sha256 === "string" ? body.pdf_sha256.trim() : "";
     if (sha) {
       const cached = await tryReplayExtract(env, sha, granular);
       if (cached) return cached;
-      return proxy(req, env, granular, sha);
+      return proxy(req, env, ctx, granular, sha);
     }
   }
-  return proxy(req, env, granular, null);
+  return proxy(req, env, ctx, granular, null);
 }
 
 async function tryReplayExtract(env: Env, sha: string, granular: boolean): Promise<Response | null> {
@@ -69,7 +73,13 @@ function cachedResponse(body: string): Response {
   });
 }
 
-async function proxy(req: Request, env: Env, granular: boolean, sha: string | null): Promise<Response> {
+async function proxy(
+  req: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  granular: boolean,
+  sha: string | null,
+): Promise<Response> {
   const url = new URL(req.url);
   const ct = (req.headers.get("content-type") || "").toLowerCase();
   let forwardBody: BodyInit | null = req.body;
@@ -85,7 +95,7 @@ async function proxy(req: Request, env: Env, granular: boolean, sha: string | nu
   if (!upstream.ok || !sha || !upstream.body) {
     return passthrough(upstream);
   }
-  const teed = captureExtractStream(upstream.body, env, sha, granular);
+  const teed = captureExtractStream(upstream.body, env, ctx, sha, granular);
   return new Response(teed, {
     status: upstream.status,
     headers: {
@@ -99,6 +109,7 @@ async function proxy(req: Request, env: Env, granular: boolean, sha: string | nu
 function captureExtractStream(
   body: ReadableStream<Uint8Array>,
   env: Env,
+  ctx: ExecutionContext,
   sha: string,
   granular: boolean,
 ): ReadableStream<Uint8Array> {
@@ -152,7 +163,9 @@ function captureExtractStream(
           frameIndex += 1;
         }
         if (key) {
-          env.CACHE.put(key, payload, { expirationTtl: ttl }).catch(() => {});
+          ctx.waitUntil(
+            env.CACHE.put(key, payload, { expirationTtl: ttl }).catch(() => {}),
+          );
         }
       }
     },

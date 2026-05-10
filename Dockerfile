@@ -91,9 +91,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/healthz" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-# Gunicorn + uvicorn workers: multiple processes share the Railway CPU budget
-# without adding RAM/CPU to the plan. CODEX_WORKERS defaults to 2 (safe for
-# Railway hobby — 2 shared vCPUs). Set higher on Pro/Team plans.
-# Single-replica deployments still benefit from 2 workers handling concurrent
-# requests without one blocking another during extraction.
-CMD ["sh", "-c", "/opt/venv/bin/gunicorn -w ${CODEX_WORKERS:-2} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8080} --timeout 120 --graceful-timeout 30 codex_pdf.api.main:app"]
+# CODEX_MODE picks the entrypoint:
+#   - unset / "api" (default): gunicorn + uvicorn workers serving the FastAPI
+#     app. CODEX_WORKERS defaults to 2 (safe for Railway hobby — 2 shared
+#     vCPUs); set higher on Pro/Team plans. Single-replica deployments still
+#     benefit from 2 workers so one extraction doesn't block another.
+#   - "speculator": run the Redis-Stream consumer that pre-warms Phase 1 +
+#     Phase 2 caches ahead of the next request. No HTTP listener.
+CMD ["sh", "-c", "if [ \"$CODEX_MODE\" = speculator ]; then exec /opt/venv/bin/python -m codex_pdf.speculator; else exec /opt/venv/bin/gunicorn -w ${CODEX_WORKERS:-2} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8080} --timeout 120 --graceful-timeout 30 codex_pdf.api.main:app; fi"]

@@ -14,16 +14,16 @@ workers_dev = true
 #   wrangler kv:namespace create CACHE --preview
 # then paste the IDs below.
 kv_namespaces = [
-  { binding = "CACHE", id = "REPLACE_ME", preview_id = "REPLACE_ME" }
+  { binding = "CACHE", id = "89a21ce1937046018a3d9d38f4e763ff", preview_id = "a4856d6f3b244087b907c189c2a2277d" }
 ]
 
 [vars]
 # Origin — the Railway codex-pdf service. Override per environment.
-CODEX_ORIGIN_URL = "https://codex-pdf.up.railway.app"
+CODEX_ORIGIN_URL = "https://codex-pdf-lint-sidecar-production.up.railway.app"
 # Codex package VERSION at deploy time. MUST match the origin's
 # `codex_pdf.version.VERSION` so KV keys line up. Bump on every
 # origin release.
-CODEX_VERSION = "1.6.0"
+CODEX_VERSION = "1.6.1"
 # TTL (seconds) for cached SSE event payloads.
 PROBE_TTL = "86400"     # 24 h — small payload, refresh daily
 PHASE1_TTL = "86400"    # 24 h — matches origin Redis TTL

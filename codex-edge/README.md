@@ -4,6 +4,15 @@ Cloudflare Worker that puts the codex-pdf probe + extract endpoints on
 the Cloudflare global edge. KV-backed write-through cache. Origin is
 the Railway codex-pdf service.
 
+## Deployed (production)
+
+- **Worker URL**: <https://codex-edge.thinkneverland.workers.dev>
+- **Account**: `99aa3f9229469650a746a7d39ac58448` (`Quincy@thinkneverland.com's Account`)
+- **KV namespace `CACHE`**: `89a21ce1937046018a3d9d38f4e763ff` (preview `a4856d6f3b244087b907c189c2a2277d`)
+- **Origin** (`CODEX_ORIGIN_URL`): `https://codex-pdf-lint-sidecar-production.up.railway.app`
+- **Codex version pinned**: `1.6.1` (`CODEX_VERSION` var — bump on origin release)
+- **TTLs**: probe 24 h, Phase 1 24 h, Phase 2 7 d
+
 ## What it caches
 
 | Endpoint                        | Cache key kind         | TTL    |
@@ -37,11 +46,23 @@ npm run typecheck
 
 ## Deploy
 
-`main` push deploys to production via the GH Action in
-`.github/workflows/deploy.yml`. Required secrets:
+Manual: from this directory,
 
-- `CLOUDFLARE_API_TOKEN` — scoped to Workers Scripts: Edit + KV: Edit
-- `CLOUDFLARE_ACCOUNT_ID`
+```sh
+export CLOUDFLARE_API_TOKEN=<scoped-token>
+export CLOUDFLARE_ACCOUNT_ID=99aa3f9229469650a746a7d39ac58448
+wrangler deploy
+```
+
+Required token scopes: `Workers Scripts Write`, `Workers KV Storage
+Write`, `Workers Routes Write`, `Account Settings Read`.
+
+CI: `main` push to the parent codex-pdf repo deploys via the GH
+Action in `codex-edge/.github/workflows/deploy.yml`. Required repo
+secrets:
+
+- `CLOUDFLARE_API_TOKEN` — scoped as above
+- `CLOUDFLARE_ACCOUNT_ID` — `99aa3f9229469650a746a7d39ac58448`
 
 ## Operations
 
