@@ -38,9 +38,11 @@ cd ../../codex-edge && npx tsc --noEmit && npx vitest run
 
 ## Conventions
 
-- **Schema additions are additive.** Adding a field is a minor bump;
-  changing a field shape or removing a field is a major bump. See
-  [`docs/backward-compatibility.md`](./docs/backward-compatibility.md).
+- **Schema additions are additive.** Adding a field is a minor bump
+  (`MINOR` of `codex_pdf.version.VERSION` and the relevant
+  `*_SCHEMA_VERSION`). Changing a field's shape or removing a field
+  is a major bump and must be paired with consumer migrations in
+  `lint-pdf` / `loupe-pdf` before the codex release ships.
 - **Read-only.** Codex never produces new PDF bytes. The audit at
   `scripts/produce_surface_audit.py` enforces this; it must stay
   green on every commit.

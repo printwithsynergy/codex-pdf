@@ -77,8 +77,9 @@ plus the per-section contracts under color and geom.
 | Deploying the API + speculator + edge | [docs/deploy.md](./docs/deploy.md) |
 | Parity profiles and baselines | [docs/parity.md](./docs/parity.md) |
 | Preflight ingest adapters | [docs/preflight-ingest.md](./docs/preflight-ingest.md) |
-| Backward-compatibility policy | [docs/backward-compatibility.md](./docs/backward-compatibility.md) |
 | Service-ownership contract | [docs/service-ownership-contract.md](./docs/service-ownership-contract.md) |
+| Codex change ripple rule | [docs/operations/codex-change-ripple.md](./docs/operations/codex-change-ripple.md) |
+| Marketing deploy template | [docs/operations/marketing-deploy-template.md](./docs/operations/marketing-deploy-template.md) |
 
 ## Contributing
 
