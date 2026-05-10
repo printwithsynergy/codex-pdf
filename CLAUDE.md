@@ -25,7 +25,7 @@ For new products (Forge, Trap, Impose, Marks, etc.), map capabilities to one own
 
 When work spans layers, define a contract seam and keep logic in its owner service.
 
-## Deployed surface (1.6.1)
+## Deployed surface (1.7.0)
 
 Codex now runs as **three services** in production. They share the
 same content-addressed cache key format
