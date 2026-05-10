@@ -64,6 +64,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from codex_pdf.api.auth import authenticate
 from codex_pdf.api.blob_store import make_blob_store
 from codex_pdf.api.cache import cache_key, make_cache
+from codex_pdf.api.warmup import warmup_worker
 from codex_pdf.api.url_ingest import fetch_pdf_from_url
 from codex_pdf.color import (
     COLOR_SCHEMA_VERSION,
@@ -76,7 +77,20 @@ from codex_pdf.color import (
     resolve_spot_swatch_color,
 )
 from codex_pdf.color.color_math import lab_d50_to_srgb, srgb_decode
-from codex_pdf.extract import extract_document, extract_document_fast, extract_from_path
+from codex_pdf.extract import (
+    assemble_codex_document,
+    extract_document,
+    extract_document_fast,
+    extract_document_pymupdf_only,
+    extract_from_path,
+    extract_probe_min,
+    extract_probe_std,
+)
+from codex_pdf.extract.color import extract_color_world_pikepdf
+from codex_pdf.extract.document import _EXTRACT_POOL, _run_fitz_pipeline
+from codex_pdf.extract.forms import extract_forms_pikepdf
+from codex_pdf.extract.ocg import extract_ocgs_pikepdf
+from codex_pdf.extract.signals import extract_analysis_signals_pikepdf
 from codex_pdf.geom import (
     GEOM_SCHEMA_VERSION,
     Box as GeomBox,
@@ -185,6 +199,24 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(RequestIdMiddleware)
+
+
+@app.on_event("startup")
+async def _warmup_on_startup() -> None:
+    """Run :func:`warmup_worker` once per gunicorn worker on boot.
+
+    Adds ~500 ms-1.5 s to worker boot but eliminates the cold-start
+    penalty on the first real request. Safe under gunicorn pre-fork:
+    the startup hook fires per worker process after fork, so each
+    worker's pool is independently primed.
+    """
+    try:
+        timings = warmup_worker()
+        app.state.warmed_up = True
+        app.state.warmup_timings = timings
+    except Exception:
+        logger.exception("warmup hook failed")
+        app.state.warmed_up = False
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +572,8 @@ async def contract() -> ContractResponse:
         schema_id="https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
         endpoints=[
             "POST /v1/extract",
+            "POST /v1/extract/stream",
+            "POST /v1/probe",
             "POST /v1/render/page",
             "POST /v1/render/separations",
             "POST /v1/render/heatmap",
@@ -678,15 +712,81 @@ def _run_extract(raw: bytes) -> dict[str, Any]:
     return payload
 
 
+def _run_extract_phase1(raw: bytes) -> dict[str, Any]:
+    """Phase 1 extract with sha-only cache key.
+
+    Repeat traffic for the same PDF returns Phase 1 in <10 ms even if
+    Phase 2 has never completed. The cache value is the JSON dump of
+    the CodexDocument that ``extract_document_fast`` produces.
+    """
+    key = cache_key(raw, {}, kind="extract-phase-1")
+    cached = _cache.get(key)
+    if cached is not None:
+        return json.loads(cached)
+
+    doc = extract_document_fast(raw)
+    payload = doc.model_dump(mode="json")
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _cache.set(key, body)
+    return payload
+
+
+def _run_extract_phase1_minimal(raw: bytes) -> dict[str, Any]:
+    """PyMuPDF-only Phase 1 for the granular SSE path.
+
+    Cached under ``kind="extract-phase-1-min"`` so the granular and
+    standard streaming endpoints don't fight over the same key.
+    """
+    key = cache_key(raw, {}, kind="extract-phase-1-min")
+    cached = _cache.get(key)
+    if cached is not None:
+        return json.loads(cached)
+    doc = extract_document_pymupdf_only(raw)
+    payload = doc.model_dump(mode="json")
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _cache.set(key, body)
+    return payload
+
+
+def _run_probe_min(raw: bytes) -> dict[str, Any]:
+    key = cache_key(raw, {}, kind="probe-min")
+    cached = _cache.get(key)
+    if cached is not None:
+        return json.loads(cached)
+    payload = extract_probe_min(raw)
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _cache.set(key, body)
+    return payload
+
+
+def _run_probe_std(raw: bytes) -> dict[str, Any]:
+    key = cache_key(raw, {}, kind="probe-std")
+    cached = _cache.get(key)
+    if cached is not None:
+        return json.loads(cached)
+    payload = extract_probe_std(raw)
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _cache.set(key, body)
+    return payload
+
+
 def _pre_render_bg(raw: bytes) -> None:
-    """Warm the render cache for page 1 at 150 DPI. Runs in a thread pool."""
-    try:
-        pre_key = cache_key(raw, {"page": 1, "dpi": 150}, kind="pre-render")
-        if _cache.get(pre_key) is None:
-            pre_png = render_page(raw, 1, dpi=150, ocg_on=[], ocg_off=[], simulate_overprint=True)
-            _cache.set(pre_key, pre_png)
-    except Exception:
-        pass
+    """Warm the render cache for page 1 at 72 DPI then 150 DPI.
+
+    Runs in a thread pool. Two tiers so a thumbnail-only consumer
+    (loupe sidebar, lint dashboard cards) gets a paintable image
+    ~4x sooner than waiting for the full 150 DPI pre-render.
+    """
+    for dpi in (72, 150):
+        try:
+            pre_key = cache_key(raw, {"page": 1, "dpi": dpi}, kind="pre-render")
+            if _cache.get(pre_key) is None:
+                pre_png = render_page(
+                    raw, 1, dpi=dpi, ocg_on=[], ocg_off=[], simulate_overprint=True
+                )
+                _cache.set(pre_key, pre_png)
+        except Exception:
+            pass
 
 
 async def _extract_impl(
@@ -736,24 +836,258 @@ async def extract_endpoint(
     return await _extract_impl(request, pdf, endpoint_label="extract")
 
 
+async def _read_probe_pdf(request: Request, pdf: UploadFile | None) -> bytes:
+    """PDF source for /v1/probe.
+
+    Multipart ``pdf`` field wins; otherwise accept a JSON body with
+    ``{"pdf_sha256": "..."}`` and resolve via ``_blob_store``. URL
+    ingestion is intentionally not supported here — probe targets sub-
+    50 ms latency, which a network fetch would blow past.
+    """
+    if pdf is not None:
+        return await _read_pdf_bytes(pdf)
+
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid JSON body: {exc}",
+            ) from exc
+        sha = None
+        if isinstance(body, dict):
+            candidate = body.get("pdf_sha256")
+            if isinstance(candidate, str) and candidate.strip():
+                sha = candidate.strip()
+        if not sha:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="JSON body must include 'pdf_sha256'",
+            )
+        cached = _blob_store.get(sha)
+        if cached is None:
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail=(
+                    f"pdf_sha256 {sha[:16]}... not in cache (expired or never "
+                    "uploaded). Re-upload the PDF as a multipart 'pdf' field."
+                ),
+            )
+        return cached
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "POST /v1/probe requires either multipart 'pdf' field or JSON body "
+            "with a 'pdf_sha256' field"
+        ),
+    )
+
+
+def _publish_speculate(sha: str, source: str) -> None:
+    """Hand a sha to codex-speculator via Redis Stream ``codex:speculate``.
+
+    Best-effort: any failure (no Redis client, stream unavailable,
+    timeout) is logged and swallowed. Speculation is purely
+    opportunistic — origin behaviour must never depend on it. A 60 s
+    SET-NX dedupe collapses repeated probes / blob puts for the same
+    sha into a single XADD.
+    """
+    try:
+        client = getattr(_blob_store, "_client", None)
+        if client is None:
+            return
+        if not client.set(f"codex:speculate:dedupe:{sha}", source, ex=60, nx=True):
+            return
+        client.xadd(
+            "codex:speculate",
+            {"sha": sha, "source": source},
+            maxlen=10000,
+            approximate=True,
+        )
+    except Exception:
+        logger.debug("speculate publish failed for sha=%s source=%s", sha[:16], source, exc_info=True)
+
+
+@app.post("/v1/probe", dependencies=[Depends(authenticate)])
+async def probe_endpoint(
+    request: Request,
+    pdf: UploadFile | None = File(default=None),
+) -> StreamingResponse:
+    """Two-event SSE probe — cheapest possible PDF facts.
+
+    Event 1 (``probe_phase=1``): page count, first-page dimensions,
+    encrypted flag. Target latency: <50 ms cold, <10 ms warm.
+
+    Event 2 (``probe_phase=2``): full page-dimension list, info
+    subset, PDF version. Target latency: <150 ms.
+
+    Both events are content-addressed and cached; repeat probes for
+    the same sha return from cache in single-digit milliseconds.
+    """
+    started = time.perf_counter()
+    try:
+        raw = await _read_probe_pdf(request, pdf)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"read failed: {exc}") from exc
+
+    sha = hashlib.sha256(raw).hexdigest()
+    _blob_store.put(sha, raw)
+    loop = asyncio.get_event_loop()
+
+    async def _generate() -> AsyncIterator[str]:
+        try:
+            ev1 = await loop.run_in_executor(None, _run_probe_min, raw)
+            ev1 = {**ev1, "pdf_sha256": sha, "probe_phase": 1}
+            yield f"data: {json.dumps(ev1, separators=(',', ':'))}\n\n"
+        except Exception:
+            pass
+
+        try:
+            ev2 = await loop.run_in_executor(None, _run_probe_std, raw)
+            ev2 = {**ev2, "pdf_sha256": sha, "probe_phase": 2}
+            yield f"data: {json.dumps(ev2, separators=(',', ':'))}\n\n"
+        except Exception:
+            pass
+
+        # Hand the sha off to codex-speculator so Phase 2 is warm by
+        # the time the client follows up with /v1/extract.
+        try:
+            await loop.run_in_executor(None, _publish_speculate, sha, "probe")
+        except Exception:
+            pass
+        _record("probe", 200, time.perf_counter() - started)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _model_dump_list(items: list) -> list:
+    return [x.model_dump(mode="json") if hasattr(x, "model_dump") else x for x in items]
+
+
+async def _generate_granular_stream(raw: bytes, sha: str) -> AsyncIterator[str]:
+    """Granular Phase 2 SSE: stream each pikepdf pass as its future settles.
+
+    Order:
+      1. ``event: phase1`` — PyMuPDF-only document.
+      2. ``event: color_world`` / ``ocgs`` / ``form_xobjects`` /
+         ``analysis`` — emitted in completion order, not submission
+         order. Each carries ``pdf_sha256`` and the partial payload.
+      3. ``event: phase2_complete`` — the merged full CodexDocument,
+         identical to the cached ``/v1/extract`` response. Caches under
+         ``kind="extract"`` so subsequent non-streaming requests hit.
+    """
+    loop = asyncio.get_event_loop()
+
+    # Phase 1 (PyMuPDF-only) — granular path uses the lightest possible
+    # baseline so color/ocgs/forms ride in as separate events later.
+    p1: dict[str, Any] | None = None
+    try:
+        p1 = await loop.run_in_executor(None, _run_extract_phase1_minimal, raw)
+        out = {**p1, "pdf_sha256": sha, "extract_phase": 1}
+        yield f"event: phase1\ndata: {json.dumps(out, separators=(',', ':'))}\n\n"
+    except Exception:
+        logger.exception("granular phase1 failed")
+
+    # Kick off the four pikepdf passes; await in completion order.
+    f_color = asyncio.wrap_future(_EXTRACT_POOL.submit(extract_color_world_pikepdf, raw))
+    f_ocgs = asyncio.wrap_future(_EXTRACT_POOL.submit(extract_ocgs_pikepdf, raw))
+    f_forms = asyncio.wrap_future(_EXTRACT_POOL.submit(extract_forms_pikepdf, raw))
+    f_signals = asyncio.wrap_future(_EXTRACT_POOL.submit(extract_analysis_signals_pikepdf, raw))
+    pending: dict[asyncio.Future, str] = {
+        f_color: "color_world",
+        f_ocgs: "ocgs",
+        f_forms: "form_xobjects",
+        f_signals: "analysis",
+    }
+
+    output_intents: list = []
+    color_spaces: list = []
+    ocgs: list = []
+    form_xobjects: list = []
+    analysis: dict[str, Any] = {}
+
+    while pending:
+        done, _ = await asyncio.wait(pending.keys(), return_when=asyncio.FIRST_COMPLETED)
+        for fut in done:
+            name = pending.pop(fut)
+            try:
+                value: Any = fut.result()
+            except Exception:
+                value = None
+            if name == "color_world":
+                if isinstance(value, tuple) and len(value) == 2:
+                    output_intents, color_spaces = value
+                payload = {
+                    "output_intents": _model_dump_list(output_intents),
+                    "color_spaces": _model_dump_list(color_spaces),
+                }
+            elif name == "ocgs":
+                ocgs = value or []
+                payload = {"ocgs": _model_dump_list(ocgs)}
+            elif name == "form_xobjects":
+                form_xobjects = value or []
+                payload = {"form_xobjects": _model_dump_list(form_xobjects)}
+            elif name == "analysis":
+                analysis = value or {}
+                payload = {"analysis": analysis}
+            else:
+                payload = {}
+            event = {**payload, "pdf_sha256": sha}
+            yield f"event: {name}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
+
+    # Assemble the canonical CodexDocument from the parts we already
+    # have — no second pass over the PDF — and cache it under the
+    # standard ``extract`` key so plain ``/v1/extract`` requests hit.
+    try:
+        fitz_data = await loop.run_in_executor(None, _run_fitz_pipeline, raw)
+        full = assemble_codex_document(
+            raw,
+            source_uri=None,
+            fitz_data=fitz_data,
+            output_intents=output_intents,
+            color_spaces=color_spaces,
+            ocgs=ocgs,
+            form_xobjects=form_xobjects,
+            analysis=analysis,
+        )
+        payload_full = full.model_dump(mode="json")
+        body = json.dumps(payload_full, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        _cache.set(cache_key(raw, {}, kind="extract"), body)
+        out = {**payload_full, "pdf_sha256": sha, "extract_phase": 2}
+        yield f"event: phase2_complete\ndata: {json.dumps(out, separators=(',', ':'))}\n\n"
+    except Exception:
+        logger.exception("granular phase2_complete failed")
+
+
 @app.post("/v1/extract/stream", dependencies=[Depends(authenticate)])
 async def extract_stream_endpoint(
     request: Request,
     pdf: UploadFile | None = File(default=None),
+    granular: int = 0,
 ) -> StreamingResponse:
     """Two-phase SSE extract for minimal time-to-first-data.
 
-    Emits two ``data:`` events separated by a blank line:
-    - Phase 1 (~200ms): PyMuPDF only — page dimensions, fonts, images,
-      annotations.  ``ocgs``, ``color_spaces``, ``output_intents``,
-      ``form_xobjects``, and ``analysis`` are empty placeholders.
-    - Phase 2 (~full extract time): complete CodexDocument with spot
-      colors, layer data, and analysis signals.
+    Default mode emits two ``data:`` events:
+    - Phase 1 (~200ms): PyMuPDF + 3 pikepdf passes — page dimensions,
+      fonts, images, annotations, color spaces, output intents, ocgs,
+      form_xobjects.  ``analysis`` is an empty placeholder.
+    - Phase 2 (~full extract time): complete CodexDocument with the
+      analysis signals merged in.
 
-    Both events carry ``extract_phase`` (1 or 2) and ``pdf_sha256`` at
-    the top level alongside the normal CodexDocument fields.  Consumers
-    can apply Phase 1 immediately for rendering and replace with Phase 2
-    when it arrives.
+    Granular mode (``?granular=1``) emits five named events instead:
+    ``phase1`` (PyMuPDF only) → ``color_world`` / ``ocgs`` /
+    ``form_xobjects`` / ``analysis`` (in completion order) →
+    ``phase2_complete`` (full CodexDocument). Lets viewers paint
+    individual signals the moment each pass finishes.
     """
     started = time.perf_counter()
     try:
@@ -766,19 +1100,18 @@ async def extract_stream_endpoint(
     sha = hashlib.sha256(raw).hexdigest()
     _blob_store.put(sha, raw)
     loop = asyncio.get_event_loop()
+    use_granular = bool(granular)
 
-    async def _generate() -> AsyncIterator[str]:
-        # Phase 1: PyMuPDF only — fast structural pass.
+    async def _generate_two_phase() -> AsyncIterator[str]:
+        # Phase 1: PyMuPDF + parallel color/ocgs/forms — sha-keyed cache.
         try:
-            p1_doc = await loop.run_in_executor(None, extract_document_fast, raw)
-            p1 = p1_doc.model_dump(mode="json")
-            p1["pdf_sha256"] = sha
-            p1["extract_phase"] = 1
+            p1 = await loop.run_in_executor(None, _run_extract_phase1, raw)
+            p1 = {**p1, "pdf_sha256": sha, "extract_phase": 1}
             yield f"data: {json.dumps(p1, separators=(',', ':'))}\n\n"
         except Exception:
             pass  # Phase 2 will still follow
 
-        # Phase 2: full extraction with parallel pikepdf passes.
+        # Phase 2: full extraction with the analysis pass merged in.
         try:
             p2 = await loop.run_in_executor(None, _run_extract, raw)
             if isinstance(p2, dict):
@@ -787,6 +1120,13 @@ async def extract_stream_endpoint(
         except Exception:
             pass
 
+    async def _generate() -> AsyncIterator[str]:
+        if use_granular:
+            async for chunk in _generate_granular_stream(raw, sha):
+                yield chunk
+        else:
+            async for chunk in _generate_two_phase():
+                yield chunk
         asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw))
         _record("extract_stream", 200, time.perf_counter() - started)
 

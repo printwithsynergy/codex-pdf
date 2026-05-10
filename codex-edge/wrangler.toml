@@ -1,0 +1,38 @@
+name = "codex-edge"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# KV cache. Probe (probe-min, probe-std) + extract (extract-phase-1,
+# extract-phase-1-min, extract) live here. Keys are byte-identical
+# to the Redis keys the origin uses, so the same VERSION bump
+# invalidates both tiers atomically.
+#
+# Provision via:
+#   wrangler kv:namespace create CACHE
+#   wrangler kv:namespace create CACHE --preview
+# then paste the IDs below.
+kv_namespaces = [
+  { binding = "CACHE", id = "REPLACE_ME", preview_id = "REPLACE_ME" }
+]
+
+[vars]
+# Origin — the Railway codex-pdf service. Override per environment.
+CODEX_ORIGIN_URL = "https://codex-pdf.up.railway.app"
+# Codex package VERSION at deploy time. MUST match the origin's
+# `codex_pdf.version.VERSION` so KV keys line up. Bump on every
+# origin release.
+CODEX_VERSION = "1.6.0"
+# TTL (seconds) for cached SSE event payloads.
+PROBE_TTL = "86400"     # 24 h — small payload, refresh daily
+PHASE1_TTL = "86400"    # 24 h — matches origin Redis TTL
+PHASE2_TTL = "604800"   # 7 d  — heaviest to recompute, cache longer
+
+[env.production]
+routes = [
+  { pattern = "codex-edge.printwithsynergy.com", custom_domain = true }
+]
+
+[env.staging]
+workers_dev = true

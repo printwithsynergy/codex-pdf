@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/probe.schema.json",
+  "title": "Codex PDF probe events",
+  "description": "Two-event SSE response for POST /v1/probe. Event 1 is the bare-minimum (~20 ms) signal: page count, first-page dimensions, encryption flag. Event 2 (~80-150 ms) adds the full page-dimension list, an Info subset, and the PDF version. Both events are content-addressed by sha and cached server-side under kinds 'probe-min' and 'probe-std'.",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/ProbeMin"},
+    {"$ref": "#/$defs/ProbeStd"}
+  ],
+  "$defs": {
+    "PageDims": {
+      "type": "object",
+      "required": ["width_pts", "height_pts", "rotation"],
+      "properties": {
+        "width_pts": {"type": "number", "minimum": 0},
+        "height_pts": {"type": "number", "minimum": 0},
+        "rotation": {"type": "integer", "enum": [0, 90, 180, 270]}
+      },
+      "additionalProperties": false
+    },
+    "InfoSubset": {
+      "type": "object",
+      "properties": {
+        "title": {"type": ["string", "null"]},
+        "author": {"type": ["string", "null"]},
+        "subject": {"type": ["string", "null"]},
+        "keywords": {"type": ["string", "null"]},
+        "creator": {"type": ["string", "null"]},
+        "producer": {"type": ["string", "null"]},
+        "format": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "ProbeMin": {
+      "type": "object",
+      "required": ["probe_phase", "pdf_sha256", "page_count", "encrypted"],
+      "properties": {
+        "probe_phase": {"const": 1},
+        "pdf_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "page_count": {"type": "integer", "minimum": 0},
+        "first_page_dims": {
+          "anyOf": [{"$ref": "#/$defs/PageDims"}, {"type": "null"}]
+        },
+        "encrypted": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "ProbeStd": {
+      "type": "object",
+      "required": ["probe_phase", "pdf_sha256", "page_count", "page_dims", "info", "pdf_version", "encrypted"],
+      "properties": {
+        "probe_phase": {"const": 2},
+        "pdf_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "page_count": {"type": "integer", "minimum": 0},
+        "page_dims": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/PageDims"}
+        },
+        "info": {"$ref": "#/$defs/InfoSubset"},
+        "pdf_version": {"type": "string"},
+        "encrypted": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  }
+}
