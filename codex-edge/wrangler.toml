@@ -23,7 +23,7 @@ CODEX_ORIGIN_URL = "https://codex-pdf-lint-sidecar-production.up.railway.app"
 # Codex package VERSION at deploy time. MUST match the origin's
 # `codex_pdf.version.VERSION` so KV keys line up. Bump on every
 # origin release.
-CODEX_VERSION = "1.8.0"
+CODEX_VERSION = "1.8.1"
 # TTL (seconds) for cached SSE event payloads.
 PROBE_TTL = "86400"     # 24 h — small payload, refresh daily
 PHASE1_TTL = "86400"    # 24 h — matches origin Redis TTL

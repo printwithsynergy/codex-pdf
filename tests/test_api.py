@@ -50,6 +50,7 @@ def test_contract_endpoint_lists_endpoints(client: TestClient) -> None:
     assert body["contract_name"] == "codex-document"
     assert body["package_version"] == VERSION
     assert "POST /v1/render/page" in body["endpoints"]
+    assert "POST /v1/retention/delete" in body["endpoints"]
 
 
 def test_schema_codex_document(client: TestClient) -> None:

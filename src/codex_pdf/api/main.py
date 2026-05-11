@@ -597,6 +597,7 @@ async def contract() -> ContractResponse:
             "POST /v1/geom/union",
             "POST /v1/geom/difference",
             "POST /v1/geom/offset",
+            "POST /v1/retention/delete",
             "GET /v1/healthz",
             "GET /v1/version",
             "GET /v1/contract",
