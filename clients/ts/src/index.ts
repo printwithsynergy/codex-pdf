@@ -142,6 +142,80 @@ export interface ExtractResponse {
   readonly [key: string]: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Unified extraction contract (1.9.0). Mirrors the Python surface
+// (CodexDetectedTextRegion, CodexConformanceVerdict, CodexClauseFailure).
+// Consumer-agnostic by design — no field, header, or shape assumes a
+// specific caller.
+//
+// Cache-key contract (stable across versions):
+//   text-regions: (pdf_hash, page_index, dpi)
+//   conformance:  (pdf_hash, profile)
+//   render:       (pdf_hash, page_index, dpi, color_space)
+// ---------------------------------------------------------------------------
+
+/**
+ * Conformance profile key. Forward-compatible — consumers must treat
+ * unknown values as opaque so a future codex release can add new
+ * profiles (e.g. pdfx6, pdfa4, pdfua2) without breaking older clients.
+ *
+ * @public
+ */
+export type ConformanceProfile =
+  | "pdfx4"
+  | "pdfx1a"
+  | "pdfx3"
+  | "pdfa1b"
+  | "pdfa2b"
+  | "pdfa3b"
+  | "pdfua1";
+
+/** One text region detected on a page during extraction. Geometry in PDF points. */
+export interface DetectedTextRegion {
+  bbox: [number, number, number, number];
+  text: string;
+  confidence: number;
+  polygon: ReadonlyArray<[number, number]>;
+  source: string;
+}
+
+export interface TextRegionsResponse {
+  pdf_hash: string;
+  page_index: number;
+  dpi: number;
+  regions: DetectedTextRegion[];
+  stage_durations_ms: Record<string, number>;
+}
+
+/** One failed conformance clause inside a ConformanceVerdictResponse. */
+export interface ClauseFailure {
+  clause: string;
+  test_number: string;
+  description: string;
+  failed_check_count: number;
+}
+
+export interface ConformanceVerdictResponse {
+  document_id: string;
+  profile: string;
+  passed: boolean;
+  clauses: ClauseFailure[];
+  stage_durations_ms: Record<string, number>;
+}
+
+/** One already-cached render tuple. */
+export interface RenderEntry {
+  page_index: number;
+  dpi: number;
+  color_space: string;
+}
+
+export interface RendersListResponse {
+  pdf_hash: string;
+  renders: RenderEntry[];
+  stage_durations_ms: Record<string, number>;
+}
+
 export interface ColorSample {
   x: number;
   y: number;
@@ -880,7 +954,71 @@ export class HttpClient {
   async extract(pdf: ArrayBuffer | Uint8Array | Blob): Promise<ExtractResponse> {
     const fd = this.buildForm(pdf, {});
     const res = await this.post("/v1/extract", fd);
-    return (await res.json()) as ExtractResponse;
+    const header = res.headers.get("X-Codex-Stage-Durations-Ms");
+    const body = (await res.json()) as ExtractResponse;
+    if (header && body && typeof body === "object" && !("stage_durations_ms" in body)) {
+      try {
+        (body as Record<string, unknown>).stage_durations_ms = JSON.parse(header);
+      } catch {
+        // Header malformed; envelope field is the source of truth anyway.
+      }
+    }
+    return body;
+  }
+
+  // -------------- unified extraction: per-resource (1.9.0) -----------
+
+  /**
+   * Fetch already-cached text regions for one page of a previously-
+   * extracted PDF. Geometry is returned in PDF user-space points.
+   *
+   * Cache key: `(pdf_hash, page_index, dpi)`. Idempotent: the same
+   * key returns the same bytes.
+   *
+   * @public
+   */
+  async getTextRegions(
+    pdfHash: string,
+    options: { pageIndex?: number; dpi?: number } = {},
+  ): Promise<TextRegionsResponse> {
+    const pageIndex = options.pageIndex ?? 0;
+    const dpi = options.dpi ?? 150;
+    const qs = `?page_index=${pageIndex}&dpi=${dpi}`;
+    const res = await this.get(`/v1/documents/${encodeURIComponent(pdfHash)}/text-regions${qs}`);
+    return (await res.json()) as TextRegionsResponse;
+  }
+
+  /**
+   * Compute (or fetch from cache) a conformance verdict for the given
+   * profile. Idempotent: a second call with the same key returns the
+   * cached verdict bit-for-bit.
+   *
+   * Cache key: `(pdf_hash, profile)`. Forward-compatible profile enum
+   * (`pdfx4`, `pdfx1a`, `pdfx3`, `pdfa1b`, `pdfa2b`, `pdfa3b`,
+   * `pdfua1`) — consumers must treat unknown values as opaque.
+   *
+   * @public
+   */
+  async computeConformance(
+    documentId: string,
+    profile: ConformanceProfile,
+  ): Promise<ConformanceVerdictResponse> {
+    const path = `/v1/documents/${encodeURIComponent(documentId)}/conformance/${encodeURIComponent(profile)}`;
+    const res = await this.post(path, "", "application/json");
+    return (await res.json()) as ConformanceVerdictResponse;
+  }
+
+  /**
+   * List `(page_index, dpi, color_space)` tuples that are already in
+   * the render cache for this PDF so consumers can skip re-requests.
+   *
+   * Render cache key: `(pdf_hash, page_index, dpi, color_space)`.
+   *
+   * @public
+   */
+  async listRenders(pdfHash: string): Promise<RendersListResponse> {
+    const res = await this.get(`/v1/documents/${encodeURIComponent(pdfHash)}/renders`);
+    return (await res.json()) as RendersListResponse;
   }
 
   /**

@@ -246,6 +246,89 @@ describe("HttpClient", () => {
     expect((final as { pages: unknown[] }).pages).toHaveLength(1);
   });
 
+  it("fills stage_durations_ms from the X-Codex-Stage-Durations-Ms header when the envelope omits it", async () => {
+    const fakeFetch: typeof fetch = async () =>
+      new Response(JSON.stringify({ pdf_sha256: "f".repeat(64), pages: [] }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Codex-Stage-Durations-Ms": JSON.stringify({ extract: 42 }),
+        },
+      });
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const doc = await client.extract(new Uint8Array());
+    expect((doc as { stage_durations_ms?: Record<string, number> }).stage_durations_ms).toEqual({
+      extract: 42,
+    });
+  });
+
+  it("issues GET /v1/documents/{hash}/text-regions with the right query string", async () => {
+    let capturedUrl: string | undefined;
+    const fakeFetch: typeof fetch = async (url) => {
+      capturedUrl = String(url);
+      return new Response(
+        JSON.stringify({
+          pdf_hash: "f".repeat(64),
+          page_index: 2,
+          dpi: 200,
+          regions: [],
+          stage_durations_ms: { text_regions: 7 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const result = await client.getTextRegions("f".repeat(64), { pageIndex: 2, dpi: 200 });
+    expect(capturedUrl).toBe(
+      `http://codex.local/v1/documents/${"f".repeat(64)}/text-regions?page_index=2&dpi=200`,
+    );
+    expect(result.page_index).toBe(2);
+    expect(result.regions).toEqual([]);
+  });
+
+  it("issues POST /v1/documents/{id}/conformance/{profile}", async () => {
+    let capturedUrl: string | undefined;
+    let capturedMethod: string | undefined;
+    const fakeFetch: typeof fetch = async (url, init) => {
+      capturedUrl = String(url);
+      capturedMethod = init?.method;
+      return new Response(
+        JSON.stringify({
+          document_id: "a".repeat(64),
+          profile: "pdfx4",
+          passed: true,
+          clauses: [],
+          stage_durations_ms: { conformance: 11 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const result = await client.computeConformance("a".repeat(64), "pdfx4");
+    expect(capturedMethod).toBe("POST");
+    expect(capturedUrl).toBe(
+      `http://codex.local/v1/documents/${"a".repeat(64)}/conformance/pdfx4`,
+    );
+    expect(result.passed).toBe(true);
+    expect(result.clauses).toEqual([]);
+  });
+
+  it("issues GET /v1/documents/{hash}/renders for the cache index", async () => {
+    const fakeFetch: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          pdf_hash: "b".repeat(64),
+          renders: [{ page_index: 1, dpi: 150, color_space: "DeviceCMYK" }],
+          stage_durations_ms: {},
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    const client = new HttpClient({ baseUrl: "http://codex.local", fetch: fakeFetch });
+    const result = await client.listRenders("b".repeat(64));
+    expect(result.renders).toHaveLength(1);
+    expect(result.renders[0]?.color_space).toBe("DeviceCMYK");
+  });
+
   it("parses heatmap header runs", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const fakeFetch: typeof fetch = async () =>

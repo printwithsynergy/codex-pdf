@@ -100,24 +100,41 @@ Draft PRs only.
   sorting). This PR did not regress it; cleanup is a separate
   follow-up.
 
-**Decisions owed:**
-- Tag policy: cut `codex-pdf@v1.2.0-rc.0` from `5c8158a` now, or
-  wait until Phase 1 lands and ship `v1.2.0` final?
-- Consumer interlock: lint-pdf#482 (commit `cc65087b`) reads via
-  the `CodexClient` abstraction behind a flag. Do we wait for
-  their CI / flag-flip before opening Phase 1, or run in parallel?
+**Decisions owed:** _none — all resolved 2026-05-11; see Resolved
+Questions below._
+
+**Resolved post-merge (2026-05-11):**
+- Package version bump `1.8.1` → `1.9.0-rc.0` (Python).
+- TS client `@printwithsynergy/codex-client` bumped to `1.9.0-rc.0`
+  with matching types + three new endpoint method stubs.
+- CHANGELOG section `Unreleased` promoted to `1.9.0-rc.0 —
+  2026-05-11`.
+- Phase 1 cleared to proceed in parallel with lint-pdf#482's
+  flag-flip.
 
 ## Open Questions
 
-- **Q1:** Cut `codex-pdf@v1.2.0-rc.0` from `5c8158a` for the
-  internal registry? — owner: human — blocks: Phase 1 publishing
-  pipeline.
-- **Q2:** Bump `@printwithsynergy/codex-client` (TS) to `1.2.0-rc.0`
-  in lockstep, or wait until Phase 3? — owner: human — blocks:
-  Phase 3 consumer rollout.
-- **Q3:** Consumer interlock with lint-pdf#482 — wait for their
-  flag-flip green-light or proceed in parallel? — owner: human —
-  blocks: Phase 1 scope sequencing.
+_None blocking._ Q1–Q3 below were resolved on 2026-05-11; kept in
+the log for traceability.
+
+### Resolved
+
+- **Q1 (resolved 2026-05-11):** Pre-release tag policy. Decision:
+  **cut `codex-pdf@v1.9.0-rc.0`** from the Phase 0 merge (next
+  package minor — previous was `1.8.1`). Gives consumers a
+  pinnable pre-release of the contract surface while stubs
+  return 501; final `1.9.0` ships when Phase 1 fills them.
+- **Q2 (resolved 2026-05-11):** TS client lockstep. Decision:
+  **bump `@printwithsynergy/codex-client` to `1.9.0-rc.0`**
+  alongside Python. Adds matching types
+  (`DetectedTextRegion`, `ConformanceVerdict`, `ClauseFailure`,
+  `ConformanceProfile`) and three new endpoint methods
+  (`getTextRegions`, `computeConformance`, `listRenders`).
+- **Q3 (resolved 2026-05-11):** Consumer interlock with
+  lint-pdf#482. Decision: **proceed with Phase 1 in parallel.**
+  lint-pdf consumer side is already merged behind a flag; they
+  can flip when ready. Phase 1 is additive — the contract shape
+  doesn't change.
 
 ## Synthesis Output
 

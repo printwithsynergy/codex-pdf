@@ -1,6 +1,16 @@
 # Schema Changelog
 
-## Unreleased
+## 1.9.0-rc.0 — 2026-05-11
+
+First release candidate of the unified extraction contract. Python
+package `codex-pdf` and TypeScript client
+`@printwithsynergy/codex-client` ship in lockstep at `1.9.0-rc.0`.
+
+Contract schema bump: `1.1.0` → `1.2.0` (additive, fully backward
+compatible — no removed or renamed fields). The codex package
+version moves from `1.8.1` → `1.9.0-rc.0`; the next package minor
+matches the new contract surface area even though the contract
+itself is identified by `schema_version`.
 
 Unified extraction API — public contract for the first-stop extract
 endpoint plus a set of per-resource second-stop endpoints so
