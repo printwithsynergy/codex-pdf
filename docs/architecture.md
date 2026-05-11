@@ -70,10 +70,23 @@ lives in [`CLAUDE.md`](../CLAUDE.md).
    alive long enough to persist every frame before the response
    stream closes.
 
+## Optional retention layer
+
+Codex 1.8+ adds an opt-in persistence branch on `POST /v1/extract`.
+When the caller sends `retain_for_training=true` and the deploy is
+wired to an S3-compatible bucket, the PDF + extract + a small
+metadata object land under a hive-partitioned key
+(`{prefix}/tenant=…/dt=…/sha256=…/`). Default behaviour is
+unchanged — bytes leave memory the moment the response ships. The
+production deployment uses Cloudflare R2 with a 90-day bucket
+lifecycle; see [`docs/deploy.md`](./deploy.md) for the env contract
+and [`CLAUDE.md`](../CLAUDE.md) for the live bucket layout.
+
 ## Consumer relationship
 
 Downstream engines (`lint-pdf`, `loupe-pdf`, marketing demos)
 treat codex output as the source of truth for document facts and
 keep any product-specific behaviour in adapter layers. New
-products map to one owner per capability — see
-[`docs/service-ownership-contract.md`](./service-ownership-contract.md).
+products map to one owner per capability — see the "Service
+boundary" and "Offshoot rule" sections of
+[`CLAUDE.md`](../CLAUDE.md).

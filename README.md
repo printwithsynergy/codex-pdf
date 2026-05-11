@@ -17,15 +17,16 @@ schema-validated.
 
 ## Status
 
-`codex-pdf 1.7.0`. Current surface includes:
+`codex-pdf 1.8.1`. Current surface includes:
 
 - Python package (`codex_pdf`) with typed `pydantic` models.
 - CLI (`codex-pdf extract|schema|contract|validate|probe|parity|render|serve`).
 - HTTP API (`/v1/extract`, `/v1/probe`, `/v1/extract/stream`,
   `/v1/render/{page,separations,heatmap,layer}`,
   `/v1/sample/{color,density}`, `/v1/walk/{type4,content-stream}`,
-  `/v1/color/{resolve,match-pantone,inkbook}`,
-  `/v1/geom/{tile,intersect,union,difference}`).
+  `/v1/color/{resolve,match-pantone,neutral-density,inkbook}`,
+  `/v1/geom/{tile,intersect,union,difference,offset}`,
+  `/v1/retention/delete`).
 - TypeScript client (`@printwithsynergy/codex-client`) mirroring the
   Python `codex_pdf.client` surface, with SSE streaming for probe
   and extract.
@@ -34,6 +35,11 @@ schema-validated.
   write-through cache layer in front of the API.
 - Redis-Streams speculator (`codex-speculator`) that pre-warms
   Phase 1 + Phase 2 caches.
+- Opt-in retention to Cloudflare R2 for the marketing demo:
+  `retain_for_training=true` on `POST /v1/extract` persists the
+  PDF + extract + metadata under a hive-partitioned key; the
+  default remains "delete bytes on response". See
+  [`CLAUDE.md`](./CLAUDE.md) for the deployed bucket layout.
 
 See [`CLAUDE.md`](./CLAUDE.md) for the full deployed-service map
 (URLs, account IDs, version-bump checklist).
@@ -77,7 +83,6 @@ plus the per-section contracts under color and geom.
 | Deploying the API + speculator + edge | [docs/deploy.md](./docs/deploy.md) |
 | Parity profiles and baselines | [docs/parity.md](./docs/parity.md) |
 | Preflight ingest adapters | [docs/preflight-ingest.md](./docs/preflight-ingest.md) |
-| Service-ownership contract | [docs/service-ownership-contract.md](./docs/service-ownership-contract.md) |
 | Codex change ripple rule | [docs/operations/codex-change-ripple.md](./docs/operations/codex-change-ripple.md) |
 | Marketing deploy template | [docs/operations/marketing-deploy-template.md](./docs/operations/marketing-deploy-template.md) |
 

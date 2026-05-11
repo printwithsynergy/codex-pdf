@@ -70,6 +70,34 @@ invalidates every tier atomically.
 - `ctx.waitUntil` keeps the Worker alive long enough to persist
   every SSE frame to KV before the response stream closes.
 
+### 4. Retention surface (R2)
+
+Opt-in PDF persistence for the marketing demo. Triggered only by
+an explicit `retain_for_training=true` form field or
+`X-Codex-Retain-For-Training: true` header on `POST /v1/extract`;
+no flag = no write.
+
+- R2 bucket: `codex-retain` (same Cloudflare account as the edge
+  Worker). 90-day expiry lifecycle rule applied at the bucket
+  level — the app does not manage retention timing.
+- S3 endpoint: `https://99aa3f9229469650a746a7d39ac58448.r2.cloudflarestorage.com`.
+- Region: `auto` (R2 requirement).
+- Token: account-scoped Cloudflare API token, R2 Storage Bucket
+  Item Write, bucket-scoped to `codex-retain`. Access key id =
+  the token's `id`; secret access key = `sha256(token.value)`.
+- Service env on `codex-pdf-lint-sidecar`: `CODEX_RETAIN_BUCKET`,
+  `CODEX_RETAIN_PREFIX` (`codex/prod`), `CODEX_RETAIN_TTL_DAYS`
+  (`90`, informational only), `CODEX_RETAIN_ENDPOINT_URL`,
+  `CODEX_RETAIN_REGION`, `CODEX_RETAIN_ACCESS_KEY_ID`,
+  `CODEX_RETAIN_SECRET_ACCESS_KEY`. Unset
+  `CODEX_RETAIN_BUCKET` to disable persistence (the retain branch
+  becomes a no-op).
+- Object key layout:
+  `codex/prod/tenant={tenant}/dt={YYYY-MM-DD}/sha256={hex64}/{document.pdf,extract.json,meta.json}`.
+- Delete endpoint: `POST /v1/retention/delete` with
+  `{"sha256": "…"}` removes all three objects for that sha across
+  every date partition under the configured tenant prefix.
+
 ### Bumping VERSION
 
 When `codex_pdf.version.VERSION` changes:

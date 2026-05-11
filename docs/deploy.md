@@ -8,7 +8,7 @@ slug: "deploy"
 
 # Deploying codex-pdf
 
-`codex-pdf 1.7.0` ships a single Dockerfile + a Cloudflare Worker.
+`codex-pdf 1.8.1` ships a single Dockerfile + a Cloudflare Worker.
 In production the same image runs as **two Railway services**, plus
 a third tier on Cloudflare:
 
@@ -47,8 +47,8 @@ your own copy.
 Build locally:
 
 ```bash
-docker build -t codex-pdf:1.7.0 .
-docker run --rm -p 8080:8080 codex-pdf:1.7.0
+docker build -t codex-pdf:1.8.1 .
+docker run --rm -p 8080:8080 codex-pdf:1.8.1
 curl localhost:8080/v1/healthz
 ```
 
@@ -130,6 +130,95 @@ Hash-keyed JSON requests hit edge KV first; multipart uploads
 bypass to origin. `ctx.waitUntil` keeps the Worker alive long
 enough for every SSE frame to land in KV before the response
 stream closes.
+
+## Optional: retention to S3-compatible storage
+
+`POST /v1/extract` honours an opt-in `retain_for_training=true` form
+field (or `X-Codex-Retain-For-Training: true` header). When the flag
+is set **and** the env contract below is configured, the API
+persists the PDF, the extract JSON, and a small `meta.json` to an
+S3-compatible bucket. With either the flag or the env contract
+absent, the persist branch is a no-op — the default is always
+"forget the bytes when the response ships".
+
+Service env (all required to enable the branch; unset
+`CODEX_RETAIN_BUCKET` to disable):
+
+| Env | Example | Purpose |
+|---|---|---|
+| `CODEX_RETAIN_BUCKET` | `codex-retain` | Target bucket name. |
+| `CODEX_RETAIN_PREFIX` | `codex/prod` | Key prefix; lets one bucket host multiple shards. |
+| `CODEX_RETAIN_TTL_DAYS` | `90` | Informational; written into `meta.json` and the audit log. Expiry itself is enforced by the bucket's lifecycle rule (operator-owned). |
+| `CODEX_RETAIN_ENDPOINT_URL` | `https://<account>.r2.cloudflarestorage.com` | S3 API endpoint. R2 / S3 / MinIO all work. |
+| `CODEX_RETAIN_REGION` | `auto` for R2, `us-east-1` for S3 | Standard S3 region. |
+| `CODEX_RETAIN_ACCESS_KEY_ID` | (32-hex on R2) | Access key id. |
+| `CODEX_RETAIN_SECRET_ACCESS_KEY` | (64-hex on R2) | Secret access key. |
+
+Object layout (hive-partitioned so Athena / Glue can query it
+later without a migration):
+
+```
+{prefix}/tenant={tenant}/dt={YYYY-MM-DD}/sha256={hex64}/document.pdf
+{prefix}/tenant={tenant}/dt={YYYY-MM-DD}/sha256={hex64}/extract.json
+{prefix}/tenant={tenant}/dt={YYYY-MM-DD}/sha256={hex64}/meta.json
+```
+
+`{tenant}` defaults to `default` and can be overridden by the
+`X-Codex-Tenant` request header (alphanumeric + dash, max 63
+chars).
+
+Companion delete endpoint: `POST /v1/retention/delete` with body
+`{"sha256": "<hex64>"}` removes all three objects for that sha
+across every date partition under the configured tenant prefix.
+Useful for "delete my data" requests.
+
+### R2 specifics
+
+R2 doesn't expose a dedicated "create S3 access key" REST endpoint;
+instead, mint a standard Cloudflare API token with the R2 bucket-
+item-write permission group and derive the S3 credentials from it:
+
+```bash
+curl -sS -X POST \
+  -H "X-Auth-Email: <you@example.com>" \
+  -H "X-Auth-Key: <global-api-key>" \
+  -H "Content-Type: application/json" \
+  "https://api.cloudflare.com/client/v4/accounts/<account_id>/tokens" \
+  -d '{
+    "name": "codex-retain-rw",
+    "policies": [{
+      "effect": "allow",
+      "resources": {
+        "com.cloudflare.edge.r2.bucket.<account_id>_default_codex-retain": "*"
+      },
+      "permission_groups": [{
+        "id": "2efd5506f9c8494dacb1fa10a3e7d5b6",
+        "name": "Workers R2 Storage Bucket Item Write"
+      }]
+    }]
+  }'
+```
+
+From the response:
+
+- `CODEX_RETAIN_ACCESS_KEY_ID` = `result.id`
+- `CODEX_RETAIN_SECRET_ACCESS_KEY` = `sha256(result.value)` (hex)
+
+The token's raw `value` is only returned once at creation — capture
+it immediately, hash to get the secret, then discard. Set
+`CODEX_RETAIN_REGION=auto` (R2 requirement).
+
+Finally, apply a lifecycle rule on the bucket out-of-band (the app
+does not manage retention timing — only the audit log records the
+declared `CODEX_RETAIN_TTL_DAYS`):
+
+```bash
+curl -sS -X PUT \
+  -H "X-Auth-Email: <you@example.com>" -H "X-Auth-Key: <global-api-key>" \
+  -H "Content-Type: application/json" \
+  "https://api.cloudflare.com/client/v4/accounts/<account_id>/r2/buckets/codex-retain/lifecycle" \
+  -d '{"rules":[{"id":"expire-90-days","enabled":true,"conditions":{"prefix":""},"deleteObjectsTransition":{"condition":{"type":"Age","maxAge":7776000}}}]}'
+```
 
 ## Local development without HTTP
 
