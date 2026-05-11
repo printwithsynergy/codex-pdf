@@ -214,9 +214,6 @@ def _polygon_corners(box: Box) -> tuple[Point, Point, Point, Point]:
     )
 
 
-_SCALE = 1_000  # pyclipr integer scale factor for offset operations
-
-
 def polygon_offset(
     path: Path,
     distance: float,
@@ -276,7 +273,11 @@ def polygon_offset(
     for ring in path.rings:
         scaled = _scale_polygon(ring)
         po.addPath(scaled, jt, et)
-    result_paths = po.execute(distance * _SCALE)
+    # Coords are scaled into integer space by `_scale_polygon` (×_CLIPPER_SCALE);
+    # the offset distance MUST use the same factor or it gets diluted by the
+    # ratio. Prior to 1.7.2 this used a private 1_000 constant that left a 1000×
+    # gap, so a 10-pt request only grew by 0.01 pt.
+    result_paths = po.execute(distance * _CLIPPER_SCALE)
     rings = [_unscale_polygon(p) for p in result_paths]
     return Path(rings=tuple(rings))
 
