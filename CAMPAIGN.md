@@ -39,8 +39,10 @@ Draft PRs only.
 
 ## Phase Plan
 
-- [x] Phase 0 — Contract freeze — PR #14 (merged `5c8158a`)
-- [x] Phase 1 — Implementations behind stubs — PR _pending_
+- [x] Phase 0 — Contract freeze — PR #14 (merged `5c8158a`),
+  rc.0 cut PR #16 (merged `5a4939f`)
+- [x] Phase 1 — Implementations behind stubs — PR #17
+  (merged `d0a1e4d`), rc.1 cut _pending_
 - [x] Phase 1.5 — Sync-vs-async conformance decision — _resolved
   inline; see Phase 1 log_
 - [ ] Phase 2 — Operational contract (errors, auth, rate limits)
@@ -113,7 +115,12 @@ Questions below._
 - Phase 1 cleared to proceed in parallel with lint-pdf#482's
   flag-flip.
 
-### Phase 1 — 2026-05-11 — PR _pending_
+### Phase 1 — 2026-05-11 — PR #17 — merged
+
+**rc.1 cut:** Python `1.9.0rc1`, TS `1.9.0-rc.1` (lockstep).
+Contract surface identical to `1.9.0-rc.0`; this release fills in
+the three endpoint bodies. Final `1.9.0` ships after Phase 2.
+
 
 **Shipped:**
 - `codex_pdf.extract.text_regions` — PyMuPDF-based detector. Walks

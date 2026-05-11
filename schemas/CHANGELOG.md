@@ -1,9 +1,14 @@
 # Schema Changelog
 
-## Unreleased
+## 1.9.0-rc.1 — 2026-05-11
 
 Phase 1 of the unified extraction campaign — the three per-resource
-endpoints stop returning 501 and start serving real data.
+endpoints stop returning 501 and start serving real data. Python
+`codex-pdf` and TypeScript `@printwithsynergy/codex-client` ship in
+lockstep at `1.9.0-rc.1`. The contract surface is identical to
+`1.9.0-rc.0`; this release fills in the bodies. Final `1.9.0` ships
+after Phase 2 hardens the operational contract (error shapes,
+tenancy, rate limits).
 
 ### Implementations behind the stubs
 
