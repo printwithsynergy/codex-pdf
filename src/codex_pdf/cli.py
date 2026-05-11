@@ -36,7 +36,7 @@ def _published_schema_path() -> Path:
 def _contract_manifest() -> dict[str, Any]:
     return {
         "contract_name": "codex-document",
-        "schema_version": "1.0.0",
+        "schema_version": "1.2.0",
         "schema_path": str(_published_schema_path()),
         "schema_id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
         "extract_command": "codex-pdf extract <input_pdf>",

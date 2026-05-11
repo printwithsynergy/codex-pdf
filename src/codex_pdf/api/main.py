@@ -573,13 +573,16 @@ async def version() -> VersionResponse:
 async def contract() -> ContractResponse:
     return ContractResponse(
         contract_name="codex-document",
-        schema_version="1.1.0",
+        schema_version="1.2.0",
         package_version=VERSION,
         schema_id="https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
         endpoints=[
             "POST /v1/extract",
             "POST /v1/extract/stream",
             "POST /v1/probe",
+            "GET /v1/documents/{pdf_hash}/text-regions",
+            "POST /v1/documents/{document_id}/conformance/{profile}",
+            "GET /v1/documents/{pdf_hash}/renders",
             "POST /v1/render/page",
             "POST /v1/render/separations",
             "POST /v1/render/heatmap",
@@ -796,6 +799,22 @@ def _pre_render_bg(raw: bytes) -> None:
             pass
 
 
+def _stage_durations_header(durations_ms: dict[str, int]) -> dict[str, str]:
+    """Serialise stage durations for the response header.
+
+    Stage telemetry rides on both the response envelope
+    (``stage_durations_ms``) and the ``X-Codex-Stage-Durations-Ms``
+    header. Initial stage names: ``extract``, ``render``,
+    ``text_regions``, ``conformance``. Adding new stage names is
+    non-breaking — consumers treat unknown keys as opaque.
+    """
+    return {
+        "X-Codex-Stage-Durations-Ms": json.dumps(
+            durations_ms, sort_keys=True, separators=(",", ":")
+        ),
+    }
+
+
 async def _extract_impl(
     request: Request,
     pdf: UploadFile | None,
@@ -817,8 +836,17 @@ async def _extract_impl(
         # Warm the page-1 render cache in the background — don't block the response.
         asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw))
         await _maybe_retain(request, raw, sha, payload, retain_form_value)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        durations = {"extract": elapsed_ms}
+        if isinstance(payload, dict):
+            existing = payload.get("stage_durations_ms")
+            if isinstance(existing, dict):
+                merged = dict(existing)
+                merged.update(durations)
+                durations = merged
+            payload["stage_durations_ms"] = durations
         _record(endpoint_label, 200, time.perf_counter() - started)
-        return JSONResponse(payload)
+        return JSONResponse(payload, headers=_stage_durations_header(durations))
     except HTTPException as exc:
         _record(endpoint_label, exc.status_code, time.perf_counter() - started)
         raise
@@ -1242,6 +1270,208 @@ async def extract_stream_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-resource second-stop endpoints. These complement ``/v1/extract``
+# (the first stop, which returns the full payload) by letting a
+# consumer that already has the codex doc ask for exactly the slice
+# it's missing or wants refreshed — no extract-then-discard round trip.
+#
+# Path components use ``{pdf_hash}`` / ``{document_id}`` interchangeably
+# as labels for the same identifier: the lower-case hex SHA-256 of the
+# PDF bytes (content-addressed, stable across deploys).
+#
+# All three endpoints are stubs in this release. They land the public
+# contract — request shape, cache keys, response shape — ahead of the
+# implementation so consumers can wire against the surface. They
+# return 501 Not Implemented (raised as ``NotImplementedError`` and
+# translated by the global handler below).
+# ---------------------------------------------------------------------------
+
+
+_VALID_CONFORMANCE_PROFILES: frozenset[str] = frozenset(
+    {"pdfx4", "pdfx1a", "pdfx3", "pdfa1b", "pdfa2b", "pdfa3b", "pdfua1"}
+)
+
+
+class TextRegionModel(BaseModel):
+    """One detected text region in PDF user-space points."""
+
+    bbox: list[float] = Field(..., min_length=4, max_length=4)
+    text: str = ""
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    polygon: list[list[float]] = Field(default_factory=list)
+    source: str = "unknown"
+
+
+class TextRegionsResponse(BaseModel):
+    """Response envelope for ``GET /v1/documents/{pdf_hash}/text-regions``.
+
+    Cache key: ``(pdf_hash, page_index, dpi)``. ``stage_durations_ms``
+    mirrors the ``X-Codex-Stage-Durations-Ms`` header.
+    """
+
+    pdf_hash: str
+    page_index: int
+    dpi: int
+    regions: list[TextRegionModel] = Field(default_factory=list)
+    stage_durations_ms: dict[str, int] = Field(default_factory=dict)
+
+
+class ClauseFailureModel(BaseModel):
+    clause: str
+    test_number: str
+    description: str = ""
+    failed_check_count: int = Field(default=0, ge=0)
+
+
+class ConformanceVerdictResponse(BaseModel):
+    """Response envelope for ``POST /v1/documents/{document_id}/conformance/{profile}``.
+
+    Cache key: ``(pdf_hash, profile)``. Idempotent — a second call with
+    the same key returns the cached verdict bit-for-bit.
+    """
+
+    document_id: str
+    profile: str
+    passed: bool = False
+    clauses: list[ClauseFailureModel] = Field(default_factory=list)
+    stage_durations_ms: dict[str, int] = Field(default_factory=dict)
+
+
+class RenderEntry(BaseModel):
+    """One already-cached render tuple. Cache key: ``(pdf_hash, page_index, dpi, color_space)``."""
+
+    page_index: int
+    dpi: int
+    color_space: str
+
+
+class RendersListResponse(BaseModel):
+    """Response envelope for ``GET /v1/documents/{pdf_hash}/renders``."""
+
+    pdf_hash: str
+    renders: list[RenderEntry] = Field(default_factory=list)
+    stage_durations_ms: dict[str, int] = Field(default_factory=dict)
+
+
+@app.exception_handler(NotImplementedError)
+async def _not_implemented_handler(_request: Request, exc: NotImplementedError) -> JSONResponse:
+    """Translate ``NotImplementedError`` to a 501 with a stable shape.
+
+    Endpoints that land the public contract ahead of the implementation
+    raise ``NotImplementedError`` from their handler body; this hook
+    turns that into ``501 Not Implemented`` so consumers get a clear
+    "shape is right, behaviour pending" signal instead of a 500.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        content={"detail": str(exc) or "not implemented"},
+    )
+
+
+@app.get(
+    "/v1/documents/{pdf_hash}/text-regions",
+    response_model=TextRegionsResponse,
+    dependencies=[Depends(authenticate)],
+    description=(
+        "Return cached detected text regions for one page of a previously "
+        "extracted PDF. ``pdf_hash`` is the lower-case hex SHA-256 of the "
+        "PDF bytes. Geometry is returned in PDF user-space points. "
+        "Cache key: ``(pdf_hash, page_index, dpi)``. Idempotent: the same "
+        "key returns the same bytes."
+    ),
+)
+async def text_regions_endpoint(
+    pdf_hash: str,
+    page_index: int = 0,
+    dpi: int = 150,
+) -> TextRegionsResponse:
+    if not _looks_like_sha256(pdf_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pdf_hash must be a lower-case hex SHA-256 (64 chars)",
+        )
+    if page_index < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="page_index must be >= 0",
+        )
+    if dpi < 36 or dpi > 900:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="dpi must be in [36, 900]",
+        )
+    raise NotImplementedError(
+        "text-regions on-demand re-fetch is not implemented yet; the public contract "
+        "is published so consumers can wire against it ahead of the rollout."
+    )
+
+
+@app.post(
+    "/v1/documents/{document_id}/conformance/{profile}",
+    response_model=ConformanceVerdictResponse,
+    dependencies=[Depends(authenticate)],
+    description=(
+        "Compute (or fetch from cache) a conformance verdict for the given "
+        "profile. ``document_id`` is the lower-case hex SHA-256 of the PDF "
+        "bytes. ``profile`` must be one of ``pdfx4``, ``pdfx1a``, ``pdfx3``, "
+        "``pdfa1b``, ``pdfa2b``, ``pdfa3b``, ``pdfua1``; the enum is "
+        "forward-compatible — consumers must treat unknown values as opaque. "
+        "Cache key: ``(pdf_hash, profile)``. Idempotent: a second call with "
+        "the same key returns the cached verdict bit-for-bit."
+    ),
+)
+async def conformance_verdict_endpoint(
+    document_id: str,
+    profile: str,
+) -> ConformanceVerdictResponse:
+    if not _looks_like_sha256(document_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="document_id must be a lower-case hex SHA-256 (64 chars)",
+        )
+    if profile not in _VALID_CONFORMANCE_PROFILES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"unknown conformance profile: {profile!r}. Known: "
+                f"{sorted(_VALID_CONFORMANCE_PROFILES)}"
+            ),
+        )
+    raise NotImplementedError(
+        "conformance verdict computation is not implemented yet; the public contract "
+        "is published so consumers can wire against it ahead of the rollout."
+    )
+
+
+@app.get(
+    "/v1/documents/{pdf_hash}/renders",
+    response_model=RendersListResponse,
+    dependencies=[Depends(authenticate)],
+    description=(
+        "List ``(page_index, dpi, color_space)`` tuples that are already in "
+        "the render cache for this PDF, so consumers can skip re-requests. "
+        "Render cache key: ``(pdf_hash, page_index, dpi, color_space)``."
+    ),
+)
+async def renders_list_endpoint(pdf_hash: str) -> RendersListResponse:
+    if not _looks_like_sha256(pdf_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pdf_hash must be a lower-case hex SHA-256 (64 chars)",
+        )
+    raise NotImplementedError(
+        "renders index is not implemented yet; the public contract is published "
+        "so consumers can wire against it ahead of the rollout."
+    )
+
+
+def _looks_like_sha256(value: str) -> bool:
+    if len(value) != 64:
+        return False
+    return all(c in "0123456789abcdef" for c in value)
 
 
 # ---------------------------------------------------------------------------

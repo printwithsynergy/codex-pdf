@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-conformance-verdict.schema.json",
+  "title": "CodexConformanceVerdict",
+  "description": "Pass/fail verdict for one conformance profile. Cache key: (pdf_hash, profile). Idempotent: a second call with the same key returns the cached verdict bit-for-bit.",
+  "type": "object",
+  "required": ["passed"],
+  "properties": {
+    "passed": { "type": "boolean", "default": false },
+    "clauses": {
+      "type": "array",
+      "items": { "$ref": "codex-clause-failure.schema.json" },
+      "default": []
+    }
+  },
+  "additionalProperties": false
+}

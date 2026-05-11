@@ -738,3 +738,116 @@ def test_basic_auth_required_when_enabled(monkeypatch: pytest.MonkeyPatch) -> No
         assert resp.status_code == 200
         resp = c.get("/v1/healthz")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Unified extraction contract: stage telemetry + per-resource endpoints.
+# These tests pin the public surface added in 1.2.0 so consumers (lint,
+# loupe, compile, …) can wire against it ahead of the implementation.
+# ---------------------------------------------------------------------------
+
+
+_ZERO_SHA = "0" * 64
+
+
+def test_extract_emits_stage_durations(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    header = resp.headers.get("X-Codex-Stage-Durations-Ms")
+    assert header is not None, resp.headers
+    parsed = json.loads(header)
+    assert "extract" in parsed
+    assert isinstance(parsed["extract"], int)
+    body = resp.json()
+    assert body.get("stage_durations_ms") == parsed
+
+
+def test_extract_response_carries_additive_fields(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # Pages carry an additive detected_text_regions list (empty until populated).
+    assert isinstance(body["pages"][0]["detected_text_regions"], list)
+    # Conformance verdicts default to an empty dict; consumers post to
+    # fill them on demand. Stage telemetry envelope is always present.
+    assert isinstance(body.get("conformance_verdicts"), dict)
+    assert isinstance(body.get("stage_durations_ms"), dict)
+
+
+def test_text_regions_endpoint_published_but_unimplemented(client: TestClient) -> None:
+    resp = client.get(f"/v1/documents/{_ZERO_SHA}/text-regions?page_index=0&dpi=150")
+    assert resp.status_code == 501, resp.text
+    body = resp.json()
+    assert "not implemented" in body["detail"].lower()
+
+
+def test_text_regions_endpoint_validates_hash_and_args(client: TestClient) -> None:
+    bad_hash = client.get("/v1/documents/not-a-hash/text-regions")
+    assert bad_hash.status_code == 400
+    bad_page = client.get(f"/v1/documents/{_ZERO_SHA}/text-regions?page_index=-1")
+    assert bad_page.status_code == 400
+    bad_dpi = client.get(f"/v1/documents/{_ZERO_SHA}/text-regions?dpi=5")
+    assert bad_dpi.status_code == 400
+
+
+def test_conformance_endpoint_published_but_unimplemented(client: TestClient) -> None:
+    resp = client.post(f"/v1/documents/{_ZERO_SHA}/conformance/pdfx4")
+    assert resp.status_code == 501, resp.text
+    body = resp.json()
+    assert "not implemented" in body["detail"].lower()
+
+
+def test_conformance_endpoint_validates_profile_enum(client: TestClient) -> None:
+    bad_profile = client.post(f"/v1/documents/{_ZERO_SHA}/conformance/pdfx99")
+    assert bad_profile.status_code == 400
+    bad_hash = client.post("/v1/documents/short/conformance/pdfx4")
+    assert bad_hash.status_code == 400
+
+
+def test_renders_list_endpoint_published_but_unimplemented(client: TestClient) -> None:
+    resp = client.get(f"/v1/documents/{_ZERO_SHA}/renders")
+    assert resp.status_code == 501, resp.text
+    body = resp.json()
+    assert "not implemented" in body["detail"].lower()
+
+
+def test_renders_list_endpoint_validates_hash(client: TestClient) -> None:
+    resp = client.get("/v1/documents/short/renders")
+    assert resp.status_code == 400
+
+
+def test_contract_lists_unified_extraction_endpoints(client: TestClient) -> None:
+    resp = client.get("/v1/contract")
+    assert resp.status_code == 200
+    body = resp.json()
+    endpoints = body["endpoints"]
+    assert "GET /v1/documents/{pdf_hash}/text-regions" in endpoints
+    assert "POST /v1/documents/{document_id}/conformance/{profile}" in endpoints
+    assert "GET /v1/documents/{pdf_hash}/renders" in endpoints
+    assert body["schema_version"] == "1.2.0"
+
+
+def test_openapi_describes_new_endpoints_and_cache_keys(client: TestClient) -> None:
+    resp = client.get("/openapi.json")
+    assert resp.status_code == 200
+    spec = resp.json()
+    paths = spec["paths"]
+    text_path = "/v1/documents/{pdf_hash}/text-regions"
+    conformance_path = "/v1/documents/{document_id}/conformance/{profile}"
+    renders_path = "/v1/documents/{pdf_hash}/renders"
+    assert text_path in paths
+    assert conformance_path in paths
+    assert renders_path in paths
+    # Cache-key contract is part of the public surface: it must be
+    # discoverable in the OpenAPI description for each endpoint.
+    assert "pdf_hash, page_index, dpi" in paths[text_path]["get"]["description"]
+    assert "pdf_hash, profile" in paths[conformance_path]["post"]["description"]
+    assert "pdf_hash, page_index, dpi, color_space" in paths[renders_path]["get"]["description"]

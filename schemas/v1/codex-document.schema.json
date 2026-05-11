@@ -6,33 +6,6 @@
           "title": "Annotation Id",
           "type": "string"
         },
-        "subtype": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Subtype"
-        },
-        "page_num": {
-          "title": "Page Num",
-          "type": "integer"
-        },
-        "rect": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CodexBBox"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "contents": {
           "anyOf": [
             {
@@ -49,6 +22,33 @@
           "default": false,
           "title": "Has Appearance Stream",
           "type": "boolean"
+        },
+        "page_num": {
+          "title": "Page Num",
+          "type": "integer"
+        },
+        "rect": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtype"
         }
       },
       "required": [
@@ -64,12 +64,12 @@
           "title": "X0",
           "type": "number"
         },
-        "y0": {
-          "title": "Y0",
-          "type": "number"
-        },
         "x1": {
           "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
           "type": "number"
         },
         "y1": {
@@ -86,11 +86,54 @@
       "title": "CodexBBox",
       "type": "object"
     },
+    "CodexClauseFailure": {
+      "description": "One failed conformance clause inside a ``ConformanceVerdict``.\n\n``clause`` and ``test_number`` reference the ISO specification text\n(e.g. clause \"6.2.3.3\" / test \"3.4-1\" for PDF/X-4). Consumers should\ntreat unknown clause/test identifiers as opaque strings.",
+      "properties": {
+        "clause": {
+          "title": "Clause",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "failed_check_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Failed Check Count",
+          "type": "integer"
+        },
+        "test_number": {
+          "title": "Test Number",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clause",
+        "test_number"
+      ],
+      "title": "CodexClauseFailure",
+      "type": "object"
+    },
     "CodexColorSpace": {
       "properties": {
-        "id": {
-          "title": "Id",
-          "type": "string"
+        "alternate_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alternate Space Id"
+        },
+        "canonical": {
+          "additionalProperties": true,
+          "title": "Canonical",
+          "type": "object"
         },
         "family": {
           "enum": [
@@ -109,11 +152,6 @@
           "title": "Family",
           "type": "string"
         },
-        "canonical": {
-          "additionalProperties": true,
-          "title": "Canonical",
-          "type": "object"
-        },
         "icc_profile_id": {
           "anyOf": [
             {
@@ -126,17 +164,16 @@
           "default": null,
           "title": "Icc Profile Id"
         },
-        "alternate_space_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Alternate Space Id"
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "spot_colorants": {
+          "items": {
+            "$ref": "#/$defs/CodexSpotColorant"
+          },
+          "title": "Spot Colorants",
+          "type": "array"
         },
         "tint_transform": {
           "anyOf": [
@@ -149,13 +186,6 @@
           ],
           "default": null,
           "title": "Tint Transform"
-        },
-        "spot_colorants": {
-          "items": {
-            "$ref": "#/$defs/CodexSpotColorant"
-          },
-          "title": "Spot Colorants",
-          "type": "array"
         }
       },
       "required": [
@@ -192,18 +222,6 @@
     },
     "CodexConformanceClaims": {
       "properties": {
-        "pdfx": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Pdfx"
-        },
         "pdfa": {
           "anyOf": [
             {
@@ -227,20 +245,96 @@
           ],
           "default": null,
           "title": "Pdfua"
+        },
+        "pdfx": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfx"
         }
       },
       "title": "CodexConformanceClaims",
       "type": "object"
     },
-    "CodexDocumentSummary": {
+    "CodexConformanceVerdict": {
+      "description": "Pass/fail verdict for one conformance profile.\n\nCache key: ``(pdf_hash, profile)`` \u2014 see\n``POST /v1/documents/{document_id}/conformance/{profile}``. Verdicts\nare idempotent: a second call for the same ``(pdf_hash, profile)``\nreturns the cached verdict.",
       "properties": {
-        "version": {
-          "default": "1.0",
-          "title": "Version",
+        "clauses": {
+          "items": {
+            "$ref": "#/$defs/CodexClauseFailure"
+          },
+          "title": "Clauses",
+          "type": "array"
+        },
+        "passed": {
+          "default": false,
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "title": "CodexConformanceVerdict",
+      "type": "object"
+    },
+    "CodexDetectedTextRegion": {
+      "description": "A text region detected on a page during extraction.\n\nGeometry is expressed in PDF user-space points so consumers can\ncomposite regions with other codex outputs (boxes, inventory) without\na per-call DPI conversion. ``polygon`` is optional: it carries a\ntighter outline when the detector produced one (e.g. layout\nanalysis), while ``bbox`` is the always-present axis-aligned\nbounding box. ``source`` records which detector path emitted the\nregion \u2014 extractors are free to add new source labels; consumers\nmust treat unknown values as opaque.\n\nCache key: ``(pdf_hash, page_index, dpi)`` \u2014 see\n``GET /v1/documents/{pdf_hash}/text-regions``.",
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/CodexBBox"
+        },
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "polygon": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Polygon",
+          "type": "array"
+        },
+        "source": {
+          "default": "unknown",
+          "title": "Source",
           "type": "string"
         },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bbox"
+      ],
+      "title": "CodexDetectedTextRegion",
+      "type": "object"
+    },
+    "CodexDocumentSummary": {
+      "properties": {
         "counts": {
           "$ref": "#/$defs/CodexSummaryCountMetrics"
+        },
+        "dieline": {
+          "$ref": "#/$defs/CodexSummaryDielineMetrics"
         },
         "images": {
           "$ref": "#/$defs/CodexSummaryImageMetrics"
@@ -254,8 +348,10 @@
         "spot_colors": {
           "$ref": "#/$defs/CodexSummarySpotColorMetrics"
         },
-        "dieline": {
-          "$ref": "#/$defs/CodexSummaryDielineMetrics"
+        "version": {
+          "default": "1.0",
+          "title": "Version",
+          "type": "string"
         }
       },
       "title": "CodexDocumentSummary",
@@ -263,10 +359,6 @@
     },
     "CodexFont": {
       "properties": {
-        "font_id": {
-          "title": "Font Id",
-          "type": "string"
-        },
         "base_name": {
           "anyOf": [
             {
@@ -279,9 +371,15 @@
           "default": null,
           "title": "Base Name"
         },
-        "subtype": {
+        "embedded": {
           "default": "unknown",
-          "title": "Subtype",
+          "enum": [
+            "full",
+            "subset",
+            "referenced",
+            "unknown"
+          ],
+          "title": "Embedded",
           "type": "string"
         },
         "encoding": {
@@ -296,16 +394,14 @@
           "default": null,
           "title": "Encoding"
         },
-        "embedded": {
-          "default": "unknown",
-          "enum": [
-            "full",
-            "subset",
-            "referenced",
-            "unknown"
-          ],
-          "title": "Embedded",
+        "font_id": {
+          "title": "Font Id",
           "type": "string"
+        },
+        "missing_glyphs_detected": {
+          "default": false,
+          "title": "Missing Glyphs Detected",
+          "type": "boolean"
         },
         "outline_type": {
           "default": "unknown",
@@ -320,17 +416,17 @@
           "title": "Outline Type",
           "type": "string"
         },
-        "missing_glyphs_detected": {
-          "default": false,
-          "title": "Missing Glyphs Detected",
-          "type": "boolean"
-        },
         "page_refs": {
           "items": {
             "type": "integer"
           },
           "title": "Page Refs",
           "type": "array"
+        },
+        "subtype": {
+          "default": "unknown",
+          "title": "Subtype",
+          "type": "string"
         }
       },
       "required": [
@@ -373,30 +469,6 @@
     },
     "CodexGraphicsStateSnapshot": {
       "properties": {
-        "fill_color_space_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Fill Color Space Id"
-        },
-        "stroke_color_space_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Stroke Color Space Id"
-        },
         "alpha_fill": {
           "anyOf": [
             {
@@ -421,6 +493,18 @@
           "default": null,
           "title": "Alpha Stroke"
         },
+        "fill_color_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Color Space Id"
+        },
         "overprint_fill": {
           "anyOf": [
             {
@@ -444,6 +528,18 @@
           ],
           "default": null,
           "title": "Overprint Stroke"
+        },
+        "stroke_color_space_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stroke Color Space Id"
         }
       },
       "title": "CodexGraphicsStateSnapshot",
@@ -451,13 +547,17 @@
     },
     "CodexICCProfile": {
       "properties": {
-        "profile_id": {
-          "title": "Profile Id",
-          "type": "string"
-        },
-        "sha256": {
-          "title": "Sha256",
-          "type": "string"
+        "color_space": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color Space"
         },
         "name": {
           "anyOf": [
@@ -471,17 +571,7 @@
           "default": null,
           "title": "Name"
         },
-        "version": {
-          "default": "unknown",
-          "enum": [
-            "v2",
-            "v4",
-            "unknown"
-          ],
-          "title": "Version",
-          "type": "string"
-        },
-        "profile_class": {
+        "named_match": {
           "anyOf": [
             {
               "type": "string"
@@ -491,19 +581,7 @@
             }
           ],
           "default": null,
-          "title": "Profile Class"
-        },
-        "color_space": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Color Space"
+          "title": "Named Match"
         },
         "pcs": {
           "anyOf": [
@@ -517,6 +595,26 @@
           "default": null,
           "title": "Pcs"
         },
+        "profile_class": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Class"
+        },
+        "profile_id": {
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
         "source": {
           "default": "Other",
           "enum": [
@@ -528,17 +626,15 @@
           "title": "Source",
           "type": "string"
         },
-        "named_match": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+        "version": {
+          "default": "unknown",
+          "enum": [
+            "v2",
+            "v4",
+            "unknown"
           ],
-          "default": null,
-          "title": "Named Match"
+          "title": "Version",
+          "type": "string"
         }
       },
       "required": [
@@ -550,21 +646,16 @@
     },
     "CodexImage": {
       "properties": {
-        "image_id": {
-          "title": "Image Id",
-          "type": "string"
-        },
-        "page_num": {
-          "title": "Page Num",
-          "type": "integer"
-        },
-        "width_px": {
-          "title": "Width Px",
-          "type": "integer"
-        },
-        "height_px": {
-          "title": "Height Px",
-          "type": "integer"
+        "bbox_effective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexBBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "bits_per_component": {
           "anyOf": [
@@ -602,22 +693,6 @@
           "default": null,
           "title": "Compression"
         },
-        "soft_mask": {
-          "default": false,
-          "title": "Soft Mask",
-          "type": "boolean"
-        },
-        "bbox_effective": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CodexBBox"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "effective_resolution_dpi": {
           "anyOf": [
             {
@@ -628,6 +703,27 @@
             }
           ],
           "default": null
+        },
+        "height_px": {
+          "title": "Height Px",
+          "type": "integer"
+        },
+        "image_id": {
+          "title": "Image Id",
+          "type": "string"
+        },
+        "page_num": {
+          "title": "Page Num",
+          "type": "integer"
+        },
+        "soft_mask": {
+          "default": false,
+          "title": "Soft Mask",
+          "type": "boolean"
+        },
+        "width_px": {
+          "title": "Width Px",
+          "type": "integer"
         }
       },
       "required": [
@@ -641,18 +737,6 @@
     },
     "CodexInfoDict": {
       "properties": {
-        "title": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Title"
-        },
         "author": {
           "anyOf": [
             {
@@ -664,42 +748,6 @@
           ],
           "default": null,
           "title": "Author"
-        },
-        "subject": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Subject"
-        },
-        "creator": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Creator"
-        },
-        "producer": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Producer"
         },
         "creation_date": {
           "anyOf": [
@@ -713,6 +761,25 @@
           "default": null,
           "title": "Creation Date"
         },
+        "creator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Creator"
+        },
+        "custom": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Custom",
+          "type": "object"
+        },
         "mod_date": {
           "anyOf": [
             {
@@ -725,12 +792,41 @@
           "default": null,
           "title": "Mod Date"
         },
-        "custom": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Custom",
-          "type": "object"
+        "producer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
         }
       },
       "title": "CodexInfoDict",
@@ -738,9 +834,10 @@
     },
     "CodexIssue": {
       "properties": {
-        "issue_id": {
-          "title": "Issue Id",
-          "type": "string"
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
         },
         "inspection_id": {
           "anyOf": [
@@ -754,13 +851,8 @@
           "default": null,
           "title": "Inspection Id"
         },
-        "severity": {
-          "enum": [
-            "error",
-            "warning",
-            "advisory"
-          ],
-          "title": "Severity",
+        "issue_id": {
+          "title": "Issue Id",
           "type": "string"
         },
         "message": {
@@ -779,6 +871,15 @@
           "default": null,
           "title": "Page Num"
         },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "advisory"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
         "source": {
           "anyOf": [
             {
@@ -790,11 +891,6 @@
           ],
           "default": null,
           "title": "Source"
-        },
-        "details": {
-          "additionalProperties": true,
-          "title": "Details",
-          "type": "object"
         }
       },
       "required": [
@@ -807,14 +903,14 @@
     },
     "CodexKnockoutGroup": {
       "properties": {
-        "group_id": {
-          "title": "Group Id",
-          "type": "string"
-        },
         "enabled": {
           "default": true,
           "title": "Enabled",
           "type": "boolean"
+        },
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
         }
       },
       "required": [
@@ -825,12 +921,6 @@
     },
     "CodexLazySamplerDescriptor": {
       "properties": {
-        "mode": {
-          "const": "on_demand",
-          "default": "on_demand",
-          "title": "Mode",
-          "type": "string"
-        },
         "endpoint": {
           "anyOf": [
             {
@@ -842,6 +932,12 @@
           ],
           "default": null,
           "title": "Endpoint"
+        },
+        "mode": {
+          "const": "on_demand",
+          "default": "on_demand",
+          "title": "Mode",
+          "type": "string"
         }
       },
       "title": "CodexLazySamplerDescriptor",
@@ -849,14 +945,6 @@
     },
     "CodexOCG": {
       "properties": {
-        "ocg_id": {
-          "title": "Ocg Id",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
         "default_visible": {
           "default": true,
           "title": "Default Visible",
@@ -880,6 +968,14 @@
           ],
           "default": null,
           "title": "Iso19593 Processing Step"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ocg_id": {
+          "title": "Ocg Id",
+          "type": "string"
         }
       },
       "required": [
@@ -891,18 +987,6 @@
     },
     "CodexOutputIntent": {
       "properties": {
-        "subtype": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Subtype"
-        },
         "output_condition_identifier": {
           "anyOf": [
             {
@@ -926,6 +1010,18 @@
           ],
           "default": null,
           "title": "Profile Id"
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtype"
         }
       },
       "title": "CodexOutputIntent",
@@ -933,30 +1029,10 @@
     },
     "CodexPage": {
       "properties": {
-        "page_num": {
-          "title": "Page Num",
-          "type": "integer"
-        },
-        "rotation": {
-          "default": 0,
-          "title": "Rotation",
-          "type": "integer"
-        },
-        "boxes": {
-          "$ref": "#/$defs/CodexPageBoxes"
-        },
-        "resources": {
-          "$ref": "#/$defs/CodexPageResourcesRef"
-        },
-        "inventory": {
-          "items": {
-            "$ref": "#/$defs/CodexPageObject"
-          },
-          "title": "Inventory",
-          "type": "array"
-        },
-        "transparency_tree": {
-          "$ref": "#/$defs/CodexTransparencyTree"
+        "analysis": {
+          "additionalProperties": true,
+          "title": "Analysis",
+          "type": "object"
         },
         "annotations": {
           "items": {
@@ -965,10 +1041,37 @@
           "title": "Annotations",
           "type": "array"
         },
-        "analysis": {
-          "additionalProperties": true,
-          "title": "Analysis",
-          "type": "object"
+        "boxes": {
+          "$ref": "#/$defs/CodexPageBoxes"
+        },
+        "detected_text_regions": {
+          "items": {
+            "$ref": "#/$defs/CodexDetectedTextRegion"
+          },
+          "title": "Detected Text Regions",
+          "type": "array"
+        },
+        "inventory": {
+          "items": {
+            "$ref": "#/$defs/CodexPageObject"
+          },
+          "title": "Inventory",
+          "type": "array"
+        },
+        "page_num": {
+          "title": "Page Num",
+          "type": "integer"
+        },
+        "resources": {
+          "$ref": "#/$defs/CodexPageResourcesRef"
+        },
+        "rotation": {
+          "default": 0,
+          "title": "Rotation",
+          "type": "integer"
+        },
+        "transparency_tree": {
+          "$ref": "#/$defs/CodexTransparencyTree"
         }
       },
       "required": [
@@ -980,10 +1083,7 @@
     },
     "CodexPageBoxes": {
       "properties": {
-        "media": {
-          "$ref": "#/$defs/CodexBBox"
-        },
-        "crop": {
+        "art": {
           "anyOf": [
             {
               "$ref": "#/$defs/CodexBBox"
@@ -1005,7 +1105,7 @@
           ],
           "default": null
         },
-        "trim": {
+        "crop": {
           "anyOf": [
             {
               "$ref": "#/$defs/CodexBBox"
@@ -1016,7 +1116,10 @@
           ],
           "default": null
         },
-        "art": {
+        "media": {
+          "$ref": "#/$defs/CodexBBox"
+        },
+        "trim": {
           "anyOf": [
             {
               "$ref": "#/$defs/CodexBBox"
@@ -1036,21 +1139,6 @@
     },
     "CodexPageObject": {
       "properties": {
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "kind": {
-          "enum": [
-            "text",
-            "vector",
-            "raster",
-            "shading",
-            "form_xobject"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
         "bbox_effective": {
           "anyOf": [
             {
@@ -1061,19 +1149,6 @@
             }
           ],
           "default": null
-        },
-        "clip_paths": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Clip Paths",
-          "type": "array"
-        },
-        "graphics_state": {
-          "$ref": "#/$defs/CodexGraphicsStateSnapshot"
-        },
-        "color_usage": {
-          "$ref": "#/$defs/CodexColorUsage"
         },
         "blend_mode": {
           "anyOf": [
@@ -1086,6 +1161,41 @@
           ],
           "default": null,
           "title": "Blend Mode"
+        },
+        "clip_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Clip Paths",
+          "type": "array"
+        },
+        "color_usage": {
+          "$ref": "#/$defs/CodexColorUsage"
+        },
+        "graphics_state": {
+          "$ref": "#/$defs/CodexGraphicsStateSnapshot"
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "vector",
+            "raster",
+            "shading",
+            "form_xobject"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "ocg_membership": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ocg Membership",
+          "type": "array"
         },
         "opacity_fill": {
           "anyOf": [
@@ -1110,13 +1220,6 @@
           ],
           "default": null,
           "title": "Opacity Stroke"
-        },
-        "ocg_membership": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Ocg Membership",
-          "type": "array"
         }
       },
       "required": [
@@ -1128,18 +1231,18 @@
     },
     "CodexPageResourcesRef": {
       "properties": {
-        "font_ids": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Font Ids",
-          "type": "array"
-        },
         "color_space_ids": {
           "items": {
             "type": "string"
           },
           "title": "Color Space Ids",
+          "type": "array"
+        },
+        "font_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Font Ids",
           "type": "array"
         },
         "xobject_ids": {
@@ -1155,21 +1258,6 @@
     },
     "CodexPreflightReport": {
       "properties": {
-        "report_id": {
-          "title": "Report Id",
-          "type": "string"
-        },
-        "source_engine": {
-          "enum": [
-            "lintPDF",
-            "callas",
-            "PitStop",
-            "Acrobat",
-            "other"
-          ],
-          "title": "Source Engine",
-          "type": "string"
-        },
         "engine_version": {
           "anyOf": [
             {
@@ -1186,6 +1274,13 @@
           "title": "Ingest Format",
           "type": "string"
         },
+        "ingest_warnings": {
+          "items": {
+            "$ref": "#/$defs/CodexWarning"
+          },
+          "title": "Ingest Warnings",
+          "type": "array"
+        },
         "issues": {
           "items": {
             "$ref": "#/$defs/CodexIssue"
@@ -1193,12 +1288,20 @@
           "title": "Issues",
           "type": "array"
         },
-        "ingest_warnings": {
-          "items": {
-            "$ref": "#/$defs/CodexWarning"
-          },
-          "title": "Ingest Warnings",
-          "type": "array"
+        "report_id": {
+          "title": "Report Id",
+          "type": "string"
+        },
+        "source_engine": {
+          "enum": [
+            "lintPDF",
+            "callas",
+            "PitStop",
+            "Acrobat",
+            "other"
+          ],
+          "title": "Source Engine",
+          "type": "string"
         }
       },
       "required": [
@@ -1254,18 +1357,6 @@
     },
     "CodexSourceRef": {
       "properties": {
-        "uri": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Uri"
-        },
         "sha256": {
           "anyOf": [
             {
@@ -1289,18 +1380,26 @@
           ],
           "default": null,
           "title": "Size Bytes"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
         }
       },
       "title": "CodexSourceRef",
       "type": "object"
     },
     "CodexSpotColorant": {
-      "description": "A spot colorant declared on a Separation / DeviceN colour space.\n\nOptional ``lab`` / ``cmyk`` / ``rgb`` / ``pantone_name`` carry per\ncolorant colour intent so downstream renderers (e.g. the loupe-pdf\nviewer) can resolve intent-accurate swatches without falling back\nto hash-of-name pseudo-random hues. Extractors are free to leave\nthem ``None`` \u2014 additive fields, no breaking change.",
+      "description": "A spot colorant declared on a Separation / DeviceN colour space.\n\nOptional ``lab`` / ``cmyk`` / ``rgb`` / ``pantone_name`` carry per\ncolorant colour intent so downstream renderers (e.g. the loupe-pdf\nviewer) can resolve intent-accurate swatches without falling back\nto hash-of-name pseudo-random hues. Extractors are free to leave\nthem ``None`` \u2014 additive fields, no breaking change.\n\n``neutral_density`` (\u00a716.1) is the optical density of the colorant\nmeasured at 0% tint on the paper substrate; ``neutral_density_source``\nrecords how it was determined.",
       "properties": {
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
         "alternate_space_id": {
           "anyOf": [
             {
@@ -1312,43 +1411,6 @@
           ],
           "default": null,
           "title": "Alternate Space Id"
-        },
-        "tint_transform": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Tint Transform"
-        },
-        "lab": {
-          "anyOf": [
-            {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "number"
-                }
-              ],
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Lab"
         },
         "cmyk": {
           "anyOf": [
@@ -1378,6 +1440,76 @@
           "default": null,
           "title": "Cmyk"
         },
+        "lab": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lab"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "neutral_density": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Neutral Density"
+        },
+        "neutral_density_source": {
+          "anyOf": [
+            {
+              "enum": [
+                "measured",
+                "computed_from_lab",
+                "estimated"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Neutral Density Source"
+        },
+        "pantone_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pantone Name"
+        },
         "rgb": {
           "anyOf": [
             {
@@ -1403,7 +1535,7 @@
           "default": null,
           "title": "Rgb"
         },
-        "pantone_name": {
+        "tint_transform": {
           "anyOf": [
             {
               "type": "string"
@@ -1413,7 +1545,7 @@
             }
           ],
           "default": null,
-          "title": "Pantone Name"
+          "title": "Tint Transform"
         }
       },
       "required": [
@@ -1424,14 +1556,9 @@
     },
     "CodexSummaryCountMetrics": {
       "properties": {
-        "pages": {
+        "embedded_fonts": {
           "default": 0,
-          "title": "Pages",
-          "type": "integer"
-        },
-        "images": {
-          "default": 0,
-          "title": "Images",
+          "title": "Embedded Fonts",
           "type": "integer"
         },
         "fonts": {
@@ -1439,19 +1566,24 @@
           "title": "Fonts",
           "type": "integer"
         },
-        "embedded_fonts": {
+        "fonts_with_missing_glyphs": {
           "default": 0,
-          "title": "Embedded Fonts",
+          "title": "Fonts With Missing Glyphs",
+          "type": "integer"
+        },
+        "images": {
+          "default": 0,
+          "title": "Images",
+          "type": "integer"
+        },
+        "pages": {
+          "default": 0,
+          "title": "Pages",
           "type": "integer"
         },
         "referenced_fonts": {
           "default": 0,
           "title": "Referenced Fonts",
-          "type": "integer"
-        },
-        "fonts_with_missing_glyphs": {
-          "default": 0,
-          "title": "Fonts With Missing Glyphs",
           "type": "integer"
         }
       },
@@ -1460,18 +1592,15 @@
     },
     "CodexSummaryDielineCandidate": {
       "properties": {
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
         "name": {
           "title": "Name",
-          "type": "string"
-        },
-        "source": {
-          "enum": [
-            "ocg_name",
-            "ocg_processing_step",
-            "trap_layer",
-            "analysis_signal"
-          ],
-          "title": "Source",
           "type": "string"
         },
         "ocg_id": {
@@ -1498,13 +1627,6 @@
           "default": null,
           "title": "Processing Step"
         },
-        "confidence": {
-          "default": 0.5,
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Confidence",
-          "type": "number"
-        },
         "reason_codes": {
           "items": {
             "enum": [
@@ -1522,6 +1644,16 @@
           },
           "title": "Reason Codes",
           "type": "array"
+        },
+        "source": {
+          "enum": [
+            "ocg_name",
+            "ocg_processing_step",
+            "trap_layer",
+            "analysis_signal"
+          ],
+          "title": "Source",
+          "type": "string"
         }
       },
       "required": [
@@ -1531,165 +1663,8 @@
       "title": "CodexSummaryDielineCandidate",
       "type": "object"
     },
-    "CodexSummaryDielineSizeMetrics": {
-      "properties": {
-        "available": {
-          "default": false,
-          "title": "Available",
-          "type": "boolean"
-        },
-        "width_pt": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Width Pt"
-        },
-        "height_pt": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Height Pt"
-        },
-        "width_mm": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Width Mm"
-        },
-        "height_mm": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Height Mm"
-        },
-        "width_in": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Width In"
-        },
-        "height_in": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Height In"
-        },
-        "depth_pt": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Depth Pt"
-        },
-        "depth_mm": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Depth Mm"
-        },
-        "depth_in": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Depth In"
-        },
-        "depth_available": {
-          "default": false,
-          "title": "Depth Available",
-          "type": "boolean"
-        },
-        "depth_note": {
-          "default": "Unavailable from 2D PDF geometry",
-          "title": "Depth Note",
-          "type": "string"
-        },
-        "source": {
-          "default": "unavailable",
-          "enum": [
-            "analysis_stroke_bbox",
-            "unavailable"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "confidence": {
-          "default": 0.0,
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Confidence",
-          "type": "number"
-        },
-        "provenance": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Provenance",
-          "type": "array"
-        }
-      },
-      "title": "CodexSummaryDielineSizeMetrics",
-      "type": "object"
-    },
     "CodexSummaryDielineMetrics": {
       "properties": {
-        "count": {
-          "default": 0,
-          "title": "Count",
-          "type": "integer"
-        },
         "candidates": {
           "items": {
             "$ref": "#/$defs/CodexSummaryDielineCandidate"
@@ -1697,12 +1672,25 @@
           "title": "Candidates",
           "type": "array"
         },
+        "count": {
+          "default": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "detector_version": {
+          "default": "canonical-v1",
+          "title": "Detector Version",
+          "type": "string"
+        },
         "overall_confidence": {
           "default": 0.0,
           "maximum": 1.0,
           "minimum": 0.0,
           "title": "Overall Confidence",
           "type": "number"
+        },
+        "size": {
+          "$ref": "#/$defs/CodexSummaryDielineSizeMetrics"
         },
         "trapped_flag": {
           "anyOf": [
@@ -1720,21 +1708,170 @@
           ],
           "default": null,
           "title": "Trapped Flag"
-        },
-        "detector_version": {
-          "default": "canonical-v1",
-          "title": "Detector Version",
-          "type": "string"
-        },
-        "size": {
-          "$ref": "#/$defs/CodexSummaryDielineSizeMetrics"
         }
       },
       "title": "CodexSummaryDielineMetrics",
       "type": "object"
     },
+    "CodexSummaryDielineSizeMetrics": {
+      "properties": {
+        "available": {
+          "default": false,
+          "title": "Available",
+          "type": "boolean"
+        },
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "depth_available": {
+          "default": false,
+          "title": "Depth Available",
+          "type": "boolean"
+        },
+        "depth_in": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth In"
+        },
+        "depth_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth Mm"
+        },
+        "depth_note": {
+          "default": "Unavailable from 2D PDF geometry",
+          "title": "Depth Note",
+          "type": "string"
+        },
+        "depth_pt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth Pt"
+        },
+        "height_in": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height In"
+        },
+        "height_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height Mm"
+        },
+        "height_pt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height Pt"
+        },
+        "provenance": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Provenance",
+          "type": "array"
+        },
+        "source": {
+          "default": "unavailable",
+          "enum": [
+            "analysis_stroke_bbox",
+            "unavailable"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "width_in": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width In"
+        },
+        "width_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width Mm"
+        },
+        "width_pt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width Pt"
+        }
+      },
+      "title": "CodexSummaryDielineSizeMetrics",
+      "type": "object"
+    },
     "CodexSummaryImageMetrics": {
       "properties": {
+        "below_300_dpi": {
+          "default": 0,
+          "title": "Below 300 Dpi",
+          "type": "integer"
+        },
         "dpi_avg": {
           "anyOf": [
             {
@@ -1759,12 +1896,7 @@
           "default": null,
           "title": "Dpi Min"
         },
-        "below_300_dpi": {
-          "default": 0,
-          "title": "Below 300 Dpi",
-          "type": "integer"
-        },
-        "largest_width_px": {
+        "largest_area_px2": {
           "anyOf": [
             {
               "type": "integer"
@@ -1774,7 +1906,7 @@
             }
           ],
           "default": null,
-          "title": "Largest Width Px"
+          "title": "Largest Area Px2"
         },
         "largest_height_px": {
           "anyOf": [
@@ -1788,7 +1920,7 @@
           "default": null,
           "title": "Largest Height Px"
         },
-        "largest_area_px2": {
+        "largest_width_px": {
           "anyOf": [
             {
               "type": "integer"
@@ -1798,7 +1930,7 @@
             }
           ],
           "default": null,
-          "title": "Largest Area Px2"
+          "title": "Largest Width Px"
         }
       },
       "title": "CodexSummaryImageMetrics",
@@ -1817,14 +1949,14 @@
           ],
           "default": null
         },
-        "total_area_sq_in": {
-          "default": 0.0,
-          "title": "Total Area Sq In",
-          "type": "number"
-        },
         "total_area_sq_ft": {
           "default": 0.0,
           "title": "Total Area Sq Ft",
+          "type": "number"
+        },
+        "total_area_sq_in": {
+          "default": 0.0,
+          "title": "Total Area Sq In",
           "type": "number"
         },
         "total_area_sq_mm": {
@@ -1838,20 +1970,20 @@
     },
     "CodexSummaryPageSize": {
       "properties": {
-        "width_in": {
-          "title": "Width In",
-          "type": "number"
-        },
         "height_in": {
           "title": "Height In",
           "type": "number"
         },
-        "width_mm": {
-          "title": "Width Mm",
-          "type": "number"
-        },
         "height_mm": {
           "title": "Height Mm",
+          "type": "number"
+        },
+        "width_in": {
+          "title": "Width In",
+          "type": "number"
+        },
+        "width_mm": {
+          "title": "Width Mm",
           "type": "number"
         }
       },
@@ -1896,65 +2028,6 @@
     },
     "CodexSummarySpotColor": {
       "properties": {
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "swatch_hex": {
-          "title": "Swatch Hex",
-          "type": "string"
-        },
-        "swatch_source": {
-          "enum": [
-            "rgb",
-            "icc_alternate",
-            "cmyk",
-            "lab",
-            "pantone",
-            "curated",
-            "hash",
-            "fallback"
-          ],
-          "title": "Swatch Source",
-          "type": "string"
-        },
-        "swatch_note": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Swatch Note"
-        },
-        "rgb": {
-          "anyOf": [
-            {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "integer"
-                }
-              ],
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Rgb"
-        },
         "cmyk": {
           "anyOf": [
             {
@@ -2008,6 +2081,10 @@
           "default": null,
           "title": "Lab"
         },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
         "pantone_name": {
           "anyOf": [
             {
@@ -2019,6 +2096,61 @@
           ],
           "default": null,
           "title": "Pantone Name"
+        },
+        "rgb": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rgb"
+        },
+        "swatch_hex": {
+          "title": "Swatch Hex",
+          "type": "string"
+        },
+        "swatch_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Swatch Note"
+        },
+        "swatch_source": {
+          "enum": [
+            "rgb",
+            "icc_alternate",
+            "cmyk",
+            "lab",
+            "pantone",
+            "curated",
+            "hash",
+            "fallback"
+          ],
+          "title": "Swatch Source",
+          "type": "string"
         }
       },
       "required": [
@@ -2031,17 +2163,17 @@
     },
     "CodexSummarySpotColorMetrics": {
       "properties": {
-        "count": {
-          "default": 0,
-          "title": "Count",
-          "type": "integer"
-        },
         "colors": {
           "items": {
             "$ref": "#/$defs/CodexSummarySpotColor"
           },
           "title": "Colors",
           "type": "array"
+        },
+        "count": {
+          "default": 0,
+          "title": "Count",
+          "type": "integer"
         }
       },
       "title": "CodexSummarySpotColorMetrics",
@@ -2049,6 +2181,18 @@
     },
     "CodexTransparencyGroup": {
       "properties": {
+        "blend_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blend Mode"
+        },
         "group_id": {
           "title": "Group Id",
           "type": "string"
@@ -2062,18 +2206,6 @@
           "default": false,
           "title": "Knockout",
           "type": "boolean"
-        },
-        "blend_mode": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Blend Mode"
         }
       },
       "required": [
@@ -2091,13 +2223,6 @@
           "title": "Groups",
           "type": "array"
         },
-        "soft_masks": {
-          "items": {
-            "$ref": "#/$defs/CodexSoftMask"
-          },
-          "title": "Soft Masks",
-          "type": "array"
-        },
         "knockout_groups": {
           "items": {
             "$ref": "#/$defs/CodexKnockoutGroup"
@@ -2107,6 +2232,13 @@
         },
         "lazy_sampler": {
           "$ref": "#/$defs/CodexLazySamplerDescriptor"
+        },
+        "soft_masks": {
+          "items": {
+            "$ref": "#/$defs/CodexSoftMask"
+          },
+          "title": "Soft Masks",
+          "type": "array"
         }
       },
       "title": "CodexTransparencyTree",
@@ -2114,6 +2246,27 @@
     },
     "CodexTrapEvidence": {
       "properties": {
+        "interpretation_notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Interpretation Notes",
+          "type": "array"
+        },
+        "trap_layers": {
+          "items": {
+            "$ref": "#/$defs/CodexTrapLayerEvidence"
+          },
+          "title": "Trap Layers",
+          "type": "array"
+        },
+        "trap_network_annotations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Trap Network Annotations",
+          "type": "array"
+        },
         "trapped_flag": {
           "anyOf": [
             {
@@ -2130,27 +2283,6 @@
           ],
           "default": null,
           "title": "Trapped Flag"
-        },
-        "trap_network_annotations": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Trap Network Annotations",
-          "type": "array"
-        },
-        "trap_layers": {
-          "items": {
-            "$ref": "#/$defs/CodexTrapLayerEvidence"
-          },
-          "title": "Trap Layers",
-          "type": "array"
-        },
-        "interpretation_notes": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Interpretation Notes",
-          "type": "array"
         }
       },
       "title": "CodexTrapEvidence",
@@ -2158,18 +2290,6 @@
     },
     "CodexTrapLayerEvidence": {
       "properties": {
-        "ocg_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ocg Id"
-        },
         "name": {
           "anyOf": [
             {
@@ -2181,6 +2301,18 @@
           ],
           "default": null,
           "title": "Name"
+        },
+        "ocg_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ocg Id"
         },
         "processing_step": {
           "anyOf": [
@@ -2230,23 +2362,6 @@
     },
     "CodexXmpPacket": {
       "properties": {
-        "present": {
-          "default": false,
-          "title": "Present",
-          "type": "boolean"
-        },
-        "pdfxid": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Pdfxid"
-        },
         "pdfa_part": {
           "anyOf": [
             {
@@ -2270,41 +2385,114 @@
           ],
           "default": null,
           "title": "Pdfua Part"
+        },
+        "pdfxid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfxid"
+        },
+        "present": {
+          "default": false,
+          "title": "Present",
+          "type": "boolean"
         }
       },
       "title": "CodexXmpPacket",
       "type": "object"
     }
   },
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
-    "schema_version": {
-      "default": "1.0.0",
-      "title": "Schema Version",
-      "type": "string"
+    "analysis": {
+      "additionalProperties": true,
+      "title": "Analysis",
+      "type": "object"
+    },
+    "annotations": {
+      "items": {
+        "$ref": "#/$defs/CodexAnnotation"
+      },
+      "title": "Annotations",
+      "type": "array"
     },
     "codex_version": {
       "title": "Codex Version",
       "type": "string"
     },
+    "color_spaces": {
+      "items": {
+        "$ref": "#/$defs/CodexColorSpace"
+      },
+      "title": "Color Spaces",
+      "type": "array"
+    },
+    "conformance": {
+      "$ref": "#/$defs/CodexConformanceClaims"
+    },
+    "conformance_verdicts": {
+      "additionalProperties": {
+        "$ref": "#/$defs/CodexConformanceVerdict"
+      },
+      "propertyNames": {
+        "enum": [
+          "pdfx4",
+          "pdfx1a",
+          "pdfx3",
+          "pdfa1b",
+          "pdfa2b",
+          "pdfa3b",
+          "pdfua1"
+        ]
+      },
+      "title": "Conformance Verdicts",
+      "type": "object"
+    },
     "document_id": {
       "title": "Document Id",
       "type": "string"
     },
-    "source": {
-      "$ref": "#/$defs/CodexSourceRef"
+    "extraction_warnings": {
+      "items": {
+        "$ref": "#/$defs/CodexWarning"
+      },
+      "title": "Extraction Warnings",
+      "type": "array"
     },
-    "pdf_version": {
-      "default": "unknown",
-      "title": "Pdf Version",
-      "type": "string"
+    "fonts": {
+      "items": {
+        "$ref": "#/$defs/CodexFont"
+      },
+      "title": "Fonts",
+      "type": "array"
     },
-    "is_encrypted": {
-      "default": false,
-      "title": "Is Encrypted",
-      "type": "boolean"
+    "form_xobjects": {
+      "items": {
+        "$ref": "#/$defs/CodexFormXObject"
+      },
+      "title": "Form Xobjects",
+      "type": "array"
     },
-    "conformance": {
-      "$ref": "#/$defs/CodexConformanceClaims"
+    "icc_profiles": {
+      "items": {
+        "$ref": "#/$defs/CodexICCProfile"
+      },
+      "title": "Icc Profiles",
+      "type": "array"
+    },
+    "images": {
+      "items": {
+        "$ref": "#/$defs/CodexImage"
+      },
+      "title": "Images",
+      "type": "array"
     },
     "info": {
       "anyOf": [
@@ -2317,16 +2505,77 @@
       ],
       "default": null
     },
-    "xmp": {
+    "is_encrypted": {
+      "default": false,
+      "title": "Is Encrypted",
+      "type": "boolean"
+    },
+    "is_linearized": {
+      "default": false,
+      "title": "Is Linearized",
+      "type": "boolean"
+    },
+    "ocgs": {
+      "items": {
+        "$ref": "#/$defs/CodexOCG"
+      },
+      "title": "Ocgs",
+      "type": "array"
+    },
+    "output_intents": {
+      "items": {
+        "$ref": "#/$defs/CodexOutputIntent"
+      },
+      "title": "Output Intents",
+      "type": "array"
+    },
+    "pages": {
+      "items": {
+        "$ref": "#/$defs/CodexPage"
+      },
+      "title": "Pages",
+      "type": "array"
+    },
+    "pdf_version": {
+      "default": "unknown",
+      "title": "Pdf Version",
+      "type": "string"
+    },
+    "preflight_reports": {
+      "items": {
+        "$ref": "#/$defs/CodexPreflightReport"
+      },
+      "title": "Preflight Reports",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/CodexSourceRef"
+    },
+    "stage_durations_ms": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Stage Durations Ms",
+      "type": "object"
+    },
+    "summary": {
       "anyOf": [
         {
-          "$ref": "#/$defs/CodexXmpPacket"
+          "$ref": "#/$defs/CodexDocumentSummary"
         },
         {
           "type": "null"
         }
       ],
       "default": null
+    },
+    "trap_evidence": {
+      "$ref": "#/$defs/CodexTrapEvidence"
     },
     "trapped_flag": {
       "anyOf": [
@@ -2345,101 +2594,16 @@
       "default": null,
       "title": "Trapped Flag"
     },
-    "output_intents": {
-      "items": {
-        "$ref": "#/$defs/CodexOutputIntent"
-      },
-      "title": "Output Intents",
-      "type": "array"
-    },
-    "icc_profiles": {
-      "items": {
-        "$ref": "#/$defs/CodexICCProfile"
-      },
-      "title": "Icc Profiles",
-      "type": "array"
-    },
-    "color_spaces": {
-      "items": {
-        "$ref": "#/$defs/CodexColorSpace"
-      },
-      "title": "Color Spaces",
-      "type": "array"
-    },
-    "fonts": {
-      "items": {
-        "$ref": "#/$defs/CodexFont"
-      },
-      "title": "Fonts",
-      "type": "array"
-    },
-    "images": {
-      "items": {
-        "$ref": "#/$defs/CodexImage"
-      },
-      "title": "Images",
-      "type": "array"
-    },
-    "ocgs": {
-      "items": {
-        "$ref": "#/$defs/CodexOCG"
-      },
-      "title": "Ocgs",
-      "type": "array"
-    },
-    "pages": {
-      "items": {
-        "$ref": "#/$defs/CodexPage"
-      },
-      "title": "Pages",
-      "type": "array"
-    },
-    "form_xobjects": {
-      "items": {
-        "$ref": "#/$defs/CodexFormXObject"
-      },
-      "title": "Form Xobjects",
-      "type": "array"
-    },
-    "trap_evidence": {
-      "$ref": "#/$defs/CodexTrapEvidence"
-    },
-    "annotations": {
-      "items": {
-        "$ref": "#/$defs/CodexAnnotation"
-      },
-      "title": "Annotations",
-      "type": "array"
-    },
-    "analysis": {
-      "additionalProperties": true,
-      "title": "Analysis",
-      "type": "object"
-    },
-    "summary": {
+    "xmp": {
       "anyOf": [
         {
-          "$ref": "#/$defs/CodexDocumentSummary"
+          "$ref": "#/$defs/CodexXmpPacket"
         },
         {
           "type": "null"
         }
       ],
       "default": null
-    },
-    "preflight_reports": {
-      "items": {
-        "$ref": "#/$defs/CodexPreflightReport"
-      },
-      "title": "Preflight Reports",
-      "type": "array"
-    },
-    "extraction_warnings": {
-      "items": {
-        "$ref": "#/$defs/CodexWarning"
-      },
-      "title": "Extraction Warnings",
-      "type": "array"
     }
   },
   "required": [
@@ -2448,7 +2612,5 @@
     "source"
   ],
   "title": "CodexDocument",
-  "type": "object",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json"
+  "type": "object"
 }

@@ -238,6 +238,70 @@ class CodexAnnotation(BaseModel):
     has_appearance_stream: bool = False
 
 
+class CodexDetectedTextRegion(BaseModel):
+    """A text region detected on a page during extraction.
+
+    Geometry is expressed in PDF user-space points so consumers can
+    composite regions with other codex outputs (boxes, inventory) without
+    a per-call DPI conversion. ``polygon`` is optional: it carries a
+    tighter outline when the detector produced one (e.g. layout
+    analysis), while ``bbox`` is the always-present axis-aligned
+    bounding box. ``source`` records which detector path emitted the
+    region — extractors are free to add new source labels; consumers
+    must treat unknown values as opaque.
+
+    Cache key: ``(pdf_hash, page_index, dpi)`` — see
+    ``GET /v1/documents/{pdf_hash}/text-regions``.
+    """
+
+    bbox: CodexBBox
+    text: str = ""
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    polygon: list[tuple[float, float]] = Field(default_factory=list)
+    source: str = "unknown"
+
+
+# Conformance profile keys. Forward-compatible: consumers must treat
+# unknown values as opaque so a future codex release can add new
+# profiles (e.g. pdfx6, pdfa4, pdfua2) without breaking older clients.
+ConformanceProfile = Literal[
+    "pdfx4",
+    "pdfx1a",
+    "pdfx3",
+    "pdfa1b",
+    "pdfa2b",
+    "pdfa3b",
+    "pdfua1",
+]
+
+
+class CodexClauseFailure(BaseModel):
+    """One failed conformance clause inside a ``ConformanceVerdict``.
+
+    ``clause`` and ``test_number`` reference the ISO specification text
+    (e.g. clause "6.2.3.3" / test "3.4-1" for PDF/X-4). Consumers should
+    treat unknown clause/test identifiers as opaque strings.
+    """
+
+    clause: str
+    test_number: str
+    description: str = ""
+    failed_check_count: int = Field(default=0, ge=0)
+
+
+class CodexConformanceVerdict(BaseModel):
+    """Pass/fail verdict for one conformance profile.
+
+    Cache key: ``(pdf_hash, profile)`` — see
+    ``POST /v1/documents/{document_id}/conformance/{profile}``. Verdicts
+    are idempotent: a second call for the same ``(pdf_hash, profile)``
+    returns the cached verdict.
+    """
+
+    passed: bool = False
+    clauses: list[CodexClauseFailure] = Field(default_factory=list)
+
+
 class CodexIssue(BaseModel):
     issue_id: str
     inspection_id: str | None = None
@@ -278,6 +342,11 @@ class CodexPage(BaseModel):
     transparency_tree: CodexTransparencyTree = Field(default_factory=CodexTransparencyTree)
     annotations: list[str] = Field(default_factory=list)
     analysis: dict[str, Any] = Field(default_factory=dict)
+    # Populated during extraction when codex has computed text regions for
+    # the page; absent otherwise. On-demand re-fetch:
+    # ``GET /v1/documents/{pdf_hash}/text-regions?page_index=N&dpi=N``.
+    # Cache key: ``(pdf_hash, page_index, dpi)``.
+    detected_text_regions: list[CodexDetectedTextRegion] = Field(default_factory=list)
 
 
 class CodexSummaryCountMetrics(BaseModel):
@@ -401,7 +470,7 @@ class CodexDocumentSummary(BaseModel):
 
 
 class CodexDocument(BaseModel):
-    schema_version: str = "1.1.0"
+    schema_version: str = "1.2.0"
     codex_version: str
     document_id: str
     source: CodexSourceRef
@@ -426,3 +495,18 @@ class CodexDocument(BaseModel):
     summary: CodexDocumentSummary | None = None
     preflight_reports: list[CodexPreflightReport] = Field(default_factory=list)
     extraction_warnings: list[CodexWarning] = Field(default_factory=list)
+    # Empty until a verdict has been requested via
+    # ``POST /v1/documents/{document_id}/conformance/{profile}``. Keys
+    # are :data:`ConformanceProfile` literals; consumers must treat
+    # unknown keys as opaque so new profiles are additive.
+    # Cache key: ``(pdf_hash, profile)``.
+    conformance_verdicts: dict[ConformanceProfile, CodexConformanceVerdict] = Field(
+        default_factory=dict
+    )
+    # Per-stage wall-clock telemetry in milliseconds. The same dict is
+    # emitted as the ``X-Codex-Stage-Durations-Ms`` response header so
+    # transports that strip headers (in-process clients, mocks) still
+    # surface it. Initial stage names: ``extract``, ``render``,
+    # ``text_regions``, ``conformance``. Adding new ones is
+    # non-breaking — consumers treat unknown keys as opaque.
+    stage_durations_ms: dict[str, int] = Field(default_factory=dict)
