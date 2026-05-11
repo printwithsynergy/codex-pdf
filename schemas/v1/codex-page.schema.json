@@ -30,7 +30,12 @@
     },
     "inventory": { "type": "array", "items": { "$ref": "codex-page-object.schema.json" } },
     "transparency_tree": { "$ref": "codex-transparency-tree.schema.json" },
-    "annotations": { "type": "array", "items": { "type": "string" } }
+    "annotations": { "type": "array", "items": { "type": "string" } },
+    "detected_text_regions": {
+      "type": "array",
+      "items": { "$ref": "codex-detected-text-region.schema.json" },
+      "description": "Text regions detected during extraction (cache key: pdf_hash, page_index, dpi)."
+    }
   },
   "additionalProperties": false
 }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-clause-failure.schema.json",
+  "title": "CodexClauseFailure",
+  "description": "One failed conformance clause inside a CodexConformanceVerdict. Clause and test_number reference the ISO specification text.",
+  "type": "object",
+  "required": ["clause", "test_number"],
+  "properties": {
+    "clause": { "type": "string" },
+    "test_number": { "type": "string" },
+    "description": { "type": "string", "default": "" },
+    "failed_check_count": { "type": "integer", "minimum": 0, "default": 0 }
+  },
+  "additionalProperties": false
+}
