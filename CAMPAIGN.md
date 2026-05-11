@@ -40,8 +40,9 @@ Draft PRs only.
 ## Phase Plan
 
 - [x] Phase 0 — Contract freeze — PR #14 (merged `5c8158a`)
-- [ ] Phase 1 — Implementations behind stubs
-- [ ] Phase 1.5 — Sync-vs-async conformance decision
+- [x] Phase 1 — Implementations behind stubs — PR _pending_
+- [x] Phase 1.5 — Sync-vs-async conformance decision — _resolved
+  inline; see Phase 1 log_
 - [ ] Phase 2 — Operational contract (errors, auth, rate limits)
 - [ ] Phase 3 — Consumer rollout + observability
 - [ ] Phase 4 — Long-tail (versioning, eviction, SLOs)
@@ -111,6 +112,92 @@ Questions below._
   2026-05-11`.
 - Phase 1 cleared to proceed in parallel with lint-pdf#482's
   flag-flip.
+
+### Phase 1 — 2026-05-11 — PR _pending_
+
+**Shipped:**
+- `codex_pdf.extract.text_regions` — PyMuPDF-based detector. Walks
+  `page.get_text("dict")` and emits text blocks as
+  `CodexDetectedTextRegion` (bbox, joined-span text, confidence,
+  source=`pymupdf`) in PDF user-space points. `/v1/extract` now
+  populates `CodexPage.detected_text_regions` on every page.
+- `codex_pdf.extract.conformance` — verdict engine with a
+  per-profile check registry. Initial coverage:
+  - PDF/X-4 / X-1a / X-3: output intent + trapped flag + PDF
+    version + XMP `pdfxid` (X-4).
+  - PDF/A-1b / 2b / 3b: XMP packet + not-encrypted + `pdfaid:part`.
+  - PDF/UA-1: XMP packet + `pdfuaid` + non-empty Title.
+- `codex_pdf.api.renders_index` — side-track of the render cache.
+  `POST /v1/render/page` writes `(page_index, dpi, color_space)`
+  on every render; `GET /v1/documents/{pdf_hash}/renders` reads
+  it back. JSON manifest under
+  `codex:{VERSION}:renders-index:{pdf_hash}` — eviction follows
+  the cache backend's TTL.
+- All three endpoints now serve real responses (was 501). 404 on
+  unknown document_id (blob missing); the cache key contract is
+  unchanged.
+- Stage telemetry now populates on every new endpoint: `extract`,
+  `text_regions`, `conformance`, `render` slots filled with real
+  wall-clock ms — both on the response envelope
+  (`stage_durations_ms`) and the `X-Codex-Stage-Durations-Ms`
+  header.
+- Producer-surface audit allowlist extended for the new
+  `codex_pdf.extract.text_regions` module (PyMuPDF read-only;
+  still no PDF write paths).
+
+**Deferred:**
+- Full ISO clause coverage. Current per-profile coverage is
+  3–4 hand-picked clauses each — catches the most common defects
+  but is not a full conformance engine. Adding more clauses is
+  a one-liner: extend `_PROFILE_CHECKS` with a
+  `ConformanceCheck`. Defer to Phase 4 (long-tail).
+- DPI-sensitive text region geometry. The current detector is
+  DPI-independent (output is in points); `dpi` is carried in the
+  cache key so a future tighter detector can vary by sampling
+  fidelity without breaking the contract.
+- Per-render colour space. `/v1/render/page` always records
+  `color_space="sRGB"` because that's what the renderer emits.
+  Separations rendering already produces other colour spaces;
+  recording those into the renders index is Phase 2 work.
+
+**Learned — conformance compute latency:**
+
+Measured on `tests/fixtures/conforming/minimal.pdf` (n=20 hot,
+n=5 cold). Numbers are milliseconds.
+
+| profile  | hot p50 | hot p95 | cold p50 | cold p95 |
+| -------- | ------- | ------- | -------- | -------- |
+| pdfx4    | 0.008   | 0.042   | 12.4     | 12.9     |
+| pdfx1a   | 0.005   | 0.013   | 12.7     | 13.9     |
+| pdfx3    | 0.006   | 0.017   | 11.0     | 12.6     |
+| pdfa1b   | 0.004   | 0.034   | 12.3     | 13.1     |
+| pdfa2b   | 0.004   | 0.013   | 12.1     | 13.3     |
+| pdfa3b   | 0.004   | 0.010   | 11.0     | 12.0     |
+| pdfua1   | 0.004   | 0.013   | 10.0     | 11.5     |
+
+Hot path is the predicate registry alone (CodexDocument already
+parsed). Cold path includes a fresh `extract_document` — the
+dominant cost — which the endpoint amortises by hitting the
+extract cache from `/v1/extract`. Both bands are orders of
+magnitude below the 2s threshold the playbook set for Phase 1.5.
+
+### Phase 1.5 — 2026-05-11 — Sync-vs-async decision
+
+**Decision: keep synchronous.** Every profile's measured p95
+(both hot and cold) lands well under the 2-second threshold from
+the playbook. The minimum-coverage check registry runs in
+microseconds when the doc is already cached, and the cold path is
+≤ 14 ms end-to-end — dominated by the extract parse, not the
+verdict math. An async job pattern would add coordination cost
+(202-then-poll, job state, eviction) for no latency win.
+
+Revisit if a future ISO clause adds a heavy probe (e.g. Type-4
+function evaluation, ICC profile validation against the printer
+reference) and pushes p95 over the threshold.
+
+**Re-evaluation trigger:** if any profile's p95 exceeds 500 ms
+(quarter of the threshold) on a representative fixture corpus,
+flip Phase 1.5 back to open and propose the 202-job pattern.
 
 ## Open Questions
 

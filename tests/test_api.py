@@ -782,11 +782,38 @@ def test_extract_response_carries_additive_fields(client: TestClient) -> None:
     assert isinstance(body.get("stage_durations_ms"), dict)
 
 
-def test_text_regions_endpoint_published_but_unimplemented(client: TestClient) -> None:
+def test_text_regions_unknown_document_returns_404(client: TestClient) -> None:
     resp = client.get(f"/v1/documents/{_ZERO_SHA}/text-regions?page_index=0&dpi=150")
-    assert resp.status_code == 501, resp.text
+    assert resp.status_code == 404, resp.text
+    assert "not in cache" in resp.json()["detail"].lower()
+
+
+def test_text_regions_returns_regions_for_extracted_pdf(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    extract = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert extract.status_code == 200
+    sha = extract.json()["pdf_sha256"]
+
+    resp = client.get(f"/v1/documents/{sha}/text-regions?page_index=0&dpi=150")
+    assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert "not implemented" in body["detail"].lower()
+    assert body["pdf_hash"] == sha
+    assert body["page_index"] == 0
+    assert body["dpi"] == 150
+    assert isinstance(body["regions"], list)
+    # Stage timing is emitted on both the envelope and the header.
+    assert "text_regions" in body["stage_durations_ms"]
+    header = resp.headers.get("X-Codex-Stage-Durations-Ms")
+    assert header is not None
+    assert "text_regions" in json.loads(header)
+
+    # Idempotent: second call returns the same payload bytes (cache hit).
+    second = client.get(f"/v1/documents/{sha}/text-regions?page_index=0&dpi=150")
+    assert second.status_code == 200
+    assert second.json()["regions"] == body["regions"]
 
 
 def test_text_regions_endpoint_validates_hash_and_args(client: TestClient) -> None:
@@ -798,11 +825,41 @@ def test_text_regions_endpoint_validates_hash_and_args(client: TestClient) -> No
     assert bad_dpi.status_code == 400
 
 
-def test_conformance_endpoint_published_but_unimplemented(client: TestClient) -> None:
+def test_conformance_unknown_document_returns_404(client: TestClient) -> None:
     resp = client.post(f"/v1/documents/{_ZERO_SHA}/conformance/pdfx4")
-    assert resp.status_code == 501, resp.text
+    assert resp.status_code == 404, resp.text
+    assert "not in cache" in resp.json()["detail"].lower()
+
+
+def test_conformance_returns_verdict_for_extracted_pdf(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    extract = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    sha = extract.json()["pdf_sha256"]
+
+    resp = client.post(f"/v1/documents/{sha}/conformance/pdfx4")
+    assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert "not implemented" in body["detail"].lower()
+    assert body["document_id"] == sha
+    assert body["profile"] == "pdfx4"
+    assert isinstance(body["passed"], bool)
+    assert isinstance(body["clauses"], list)
+    # Failed clauses carry the expected shape; descriptions are non-empty
+    # so consumers can surface human-readable text without a separate lookup.
+    for clause in body["clauses"]:
+        assert clause["clause"]
+        assert clause["test_number"]
+        assert clause["failed_check_count"] >= 1
+    assert "conformance" in body["stage_durations_ms"]
+
+    # Idempotent: second call hits the cache and returns the same verdict.
+    second = client.post(f"/v1/documents/{sha}/conformance/pdfx4")
+    assert second.status_code == 200
+    body2 = second.json()
+    assert body2["passed"] == body["passed"]
+    assert body2["clauses"] == body["clauses"]
 
 
 def test_conformance_endpoint_validates_profile_enum(client: TestClient) -> None:
@@ -812,16 +869,41 @@ def test_conformance_endpoint_validates_profile_enum(client: TestClient) -> None
     assert bad_hash.status_code == 400
 
 
-def test_renders_list_endpoint_published_but_unimplemented(client: TestClient) -> None:
+def test_renders_list_unknown_document_returns_empty(client: TestClient) -> None:
     resp = client.get(f"/v1/documents/{_ZERO_SHA}/renders")
-    assert resp.status_code == 501, resp.text
+    assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert "not implemented" in body["detail"].lower()
+    assert body["pdf_hash"] == _ZERO_SHA
+    assert body["renders"] == []
 
 
 def test_renders_list_endpoint_validates_hash(client: TestClient) -> None:
     resp = client.get("/v1/documents/short/renders")
     assert resp.status_code == 400
+
+
+@pytest.mark.skipif(not has_ghostscript(), reason="Ghostscript not installed")
+def test_renders_list_reflects_render_cache(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    extract = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    sha = extract.json()["pdf_sha256"]
+    render = client.post(
+        "/v1/render/page",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+        data={"page": "1", "dpi": "72"},
+    )
+    assert render.status_code == 200
+
+    resp = client.get(f"/v1/documents/{sha}/renders")
+    assert resp.status_code == 200
+    renders = resp.json()["renders"]
+    assert any(
+        entry["page_index"] == 0 and entry["dpi"] == 72 and entry["color_space"] == "sRGB"
+        for entry in renders
+    ), renders
 
 
 def test_contract_lists_unified_extraction_endpoints(client: TestClient) -> None:
