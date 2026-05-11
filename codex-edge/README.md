@@ -10,7 +10,7 @@ the Railway codex-pdf service.
 - **Account**: `99aa3f9229469650a746a7d39ac58448` (`Quincy@thinkneverland.com's Account`)
 - **KV namespace `CACHE`**: `89a21ce1937046018a3d9d38f4e763ff` (preview `a4856d6f3b244087b907c189c2a2277d`)
 - **Origin** (`CODEX_ORIGIN_URL`): `https://codex-pdf-lint-sidecar-production.up.railway.app`
-- **Codex version pinned**: `1.8.0` (`CODEX_VERSION` var — bump on origin release)
+- **Codex version pinned**: `1.8.1` (`CODEX_VERSION` var — bump on origin release)
 - **TTLs**: probe 24 h, Phase 1 24 h, Phase 2 7 d
 
 ## What it caches
