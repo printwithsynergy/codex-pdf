@@ -1,5 +1,43 @@
 # Schema Changelog
 
+## Unreleased
+
+Phase 1 of the unified extraction campaign — the three per-resource
+endpoints stop returning 501 and start serving real data.
+
+### Implementations behind the stubs
+
+- `GET /v1/documents/{pdf_hash}/text-regions` — PyMuPDF-based
+  detector; geometry in PDF user-space points. Idempotent under the
+  cache key `(pdf_hash, page_index, dpi)`.
+- `POST /v1/documents/{document_id}/conformance/{profile}` — verdict
+  engine with a hand-curated check registry per profile. Cached
+  under `(pdf_hash, profile)`. Idempotent.
+- `GET /v1/documents/{pdf_hash}/renders` — reads a side-track that
+  `POST /v1/render/page` writes on every render. Lists cached
+  `(page_index, dpi, color_space)` tuples.
+
+Unknown document hash returns `404 Not Found` (was `501`) — upload
+via `/v1/extract` first or pass raw bytes.
+
+### Stage telemetry now populated
+
+Every new endpoint emits real wall-clock ms in `stage_durations_ms`
+(envelope + `X-Codex-Stage-Durations-Ms` header). Initial slots:
+`extract`, `text_regions`, `conformance`, `render`.
+
+### Extract response gains regions inline
+
+`/v1/extract` now populates `CodexPage.detected_text_regions` on
+every page on its way out, so consumers receive regions in the
+first-stop response without a follow-up call.
+
+### Cache-key contract unchanged
+
+Cache keys for all three endpoints are still as documented in
+`1.9.0-rc.0`. Phase 1 fills in the bodies; the contract surface is
+the same.
+
 ## 1.9.0-rc.0 — 2026-05-11
 
 First release candidate of the unified extraction contract. Python

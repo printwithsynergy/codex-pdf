@@ -195,6 +195,15 @@ def assemble_codex_document(
         pages=fitz_data["pages"],
     )
     doc.summary = build_document_summary(doc)
+    # Detected text regions are populated for every page on the full
+    # extract path. Failures are swallowed per page so a tricky PDF
+    # never aborts the whole extract.
+    try:
+        from codex_pdf.extract.text_regions import populate_detected_text_regions
+
+        populate_detected_text_regions(pdf_bytes, doc.pages)
+    except Exception:
+        pass
     return doc
 
 

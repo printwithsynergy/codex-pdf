@@ -82,14 +82,17 @@ from codex_pdf.color import (
     resolve_spot_swatch_color,
 )
 from codex_pdf.color.color_math import lab_d50_to_srgb, srgb_decode
+from codex_pdf.api.renders_index import list_renders, record_render
 from codex_pdf.extract import (
     assemble_codex_document,
+    compute_conformance_verdict,
     extract_document,
     extract_document_fast,
     extract_document_pymupdf_only,
     extract_from_path,
     extract_probe_min,
     extract_probe_std,
+    extract_text_regions_for_page,
 )
 from codex_pdf.extract.color import extract_color_world_pikepdf
 from codex_pdf.extract.document import _EXTRACT_POOL, _run_fitz_pipeline
@@ -1384,6 +1387,7 @@ async def _not_implemented_handler(_request: Request, exc: NotImplementedError) 
     ),
 )
 async def text_regions_endpoint(
+    response: Response,
     pdf_hash: str,
     page_index: int = 0,
     dpi: int = 150,
@@ -1403,10 +1407,56 @@ async def text_regions_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="dpi must be in [36, 900]",
         )
-    raise NotImplementedError(
-        "text-regions on-demand re-fetch is not implemented yet; the public contract "
-        "is published so consumers can wire against it ahead of the rollout."
+
+    started = time.perf_counter()
+    raw = _blob_store.get(pdf_hash)
+    if raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"document {pdf_hash[:16]}... not in cache. "
+                "Upload via POST /v1/extract first, or pass the raw PDF."
+            ),
+        )
+
+    key = cache_key(raw, {"page_index": page_index, "dpi": dpi}, kind="text-regions")
+    cached = _cache.get(key)
+    if cached is not None:
+        payload = json.loads(cached)
+        durations = {"text_regions": int((time.perf_counter() - started) * 1000)}
+        payload["stage_durations_ms"] = durations
+        for k, v in _stage_durations_header(durations).items():
+            response.headers[k] = v
+        _record("text_regions", 200, time.perf_counter() - started)
+        return TextRegionsResponse(**payload)
+
+    loop = asyncio.get_event_loop()
+    regions = await loop.run_in_executor(
+        None, extract_text_regions_for_page, raw, page_index, dpi
     )
+    payload = {
+        "pdf_hash": pdf_hash,
+        "page_index": page_index,
+        "dpi": dpi,
+        "regions": [
+            {
+                "bbox": [r.bbox.x0, r.bbox.y0, r.bbox.x1, r.bbox.y1],
+                "text": r.text,
+                "confidence": r.confidence,
+                "polygon": [list(p) for p in r.polygon],
+                "source": r.source,
+            }
+            for r in regions
+        ],
+        "stage_durations_ms": {},
+    }
+    _cache.set(key, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    durations = {"text_regions": int((time.perf_counter() - started) * 1000)}
+    payload["stage_durations_ms"] = durations
+    for k, v in _stage_durations_header(durations).items():
+        response.headers[k] = v
+    _record("text_regions", 200, time.perf_counter() - started)
+    return TextRegionsResponse(**payload)
 
 
 @app.post(
@@ -1424,6 +1474,7 @@ async def text_regions_endpoint(
     ),
 )
 async def conformance_verdict_endpoint(
+    response: Response,
     document_id: str,
     profile: str,
 ) -> ConformanceVerdictResponse:
@@ -1440,10 +1491,55 @@ async def conformance_verdict_endpoint(
                 f"{sorted(_VALID_CONFORMANCE_PROFILES)}"
             ),
         )
-    raise NotImplementedError(
-        "conformance verdict computation is not implemented yet; the public contract "
-        "is published so consumers can wire against it ahead of the rollout."
+
+    started = time.perf_counter()
+    raw = _blob_store.get(document_id)
+    if raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"document {document_id[:16]}... not in cache. "
+                "Upload via POST /v1/extract first, or pass the raw PDF."
+            ),
+        )
+
+    key = cache_key(raw, {"profile": profile}, kind="conformance")
+    cached = _cache.get(key)
+    if cached is not None:
+        payload = json.loads(cached)
+        durations = {"conformance": int((time.perf_counter() - started) * 1000)}
+        payload["stage_durations_ms"] = durations
+        for k, v in _stage_durations_header(durations).items():
+            response.headers[k] = v
+        _record("conformance", 200, time.perf_counter() - started)
+        return ConformanceVerdictResponse(**payload)
+
+    loop = asyncio.get_event_loop()
+    verdict = await loop.run_in_executor(
+        None, compute_conformance_verdict, raw, profile
     )
+    payload = {
+        "document_id": document_id,
+        "profile": profile,
+        "passed": verdict.passed,
+        "clauses": [
+            {
+                "clause": c.clause,
+                "test_number": c.test_number,
+                "description": c.description,
+                "failed_check_count": c.failed_check_count,
+            }
+            for c in verdict.clauses
+        ],
+        "stage_durations_ms": {},
+    }
+    _cache.set(key, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    durations = {"conformance": int((time.perf_counter() - started) * 1000)}
+    payload["stage_durations_ms"] = durations
+    for k, v in _stage_durations_header(durations).items():
+        response.headers[k] = v
+    _record("conformance", 200, time.perf_counter() - started)
+    return ConformanceVerdictResponse(**payload)
 
 
 @app.get(
@@ -1456,15 +1552,25 @@ async def conformance_verdict_endpoint(
         "Render cache key: ``(pdf_hash, page_index, dpi, color_space)``."
     ),
 )
-async def renders_list_endpoint(pdf_hash: str) -> RendersListResponse:
+async def renders_list_endpoint(
+    response: Response,
+    pdf_hash: str,
+) -> RendersListResponse:
     if not _looks_like_sha256(pdf_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="pdf_hash must be a lower-case hex SHA-256 (64 chars)",
         )
-    raise NotImplementedError(
-        "renders index is not implemented yet; the public contract is published "
-        "so consumers can wire against it ahead of the rollout."
+    started = time.perf_counter()
+    entries = list_renders(_cache, pdf_hash)
+    durations = {"render": int((time.perf_counter() - started) * 1000)}
+    for k, v in _stage_durations_header(durations).items():
+        response.headers[k] = v
+    _record("renders_list", 200, time.perf_counter() - started)
+    return RendersListResponse(
+        pdf_hash=pdf_hash,
+        renders=[RenderEntry(**e) for e in entries],
+        stage_durations_ms=durations,
     )
 
 
@@ -1491,7 +1597,7 @@ async def render_page_endpoint(
 ) -> Response:
     started = time.perf_counter()
     try:
-        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, sha = await _resolve_pdf_bytes(pdf, pdf_sha256)
         on_list = _parse_int_list(ocg_on)
         off_list = _parse_int_list(ocg_off)
         args = {
@@ -1502,10 +1608,27 @@ async def render_page_endpoint(
             "simulate_overprint": simulate_overprint,
         }
         key = cache_key(raw, args, kind="page")
+        # The render colour space is currently fixed sRGB for the
+        # /v1/render/page endpoint; it's part of the renders-index
+        # contract so consumers can disambiguate from separation
+        # renders without an extra lookup.
+        color_space = "sRGB"
         cached = _cache.get(key)
         if cached is not None:
+            record_render(
+                _cache,
+                sha,
+                page_index=page - 1,
+                dpi=dpi,
+                color_space=color_space,
+            )
+            durations = {"render": int((time.perf_counter() - started) * 1000)}
             _record("render_page", 200, time.perf_counter() - started)
-            return Response(cached, media_type="image/png")
+            return Response(
+                cached,
+                media_type="image/png",
+                headers=_stage_durations_header(durations),
+            )
 
         png = render_page(
             raw,
@@ -1516,8 +1639,20 @@ async def render_page_endpoint(
             simulate_overprint=simulate_overprint,
         )
         _cache.set(key, png)
+        record_render(
+            _cache,
+            sha,
+            page_index=page - 1,
+            dpi=dpi,
+            color_space=color_space,
+        )
+        durations = {"render": int((time.perf_counter() - started) * 1000)}
         _record("render_page", 200, time.perf_counter() - started)
-        return Response(png, media_type="image/png")
+        return Response(
+            png,
+            media_type="image/png",
+            headers=_stage_durations_header(durations),
+        )
     except OCGError as exc:
         _record("render_page", 422, time.perf_counter() - started)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
