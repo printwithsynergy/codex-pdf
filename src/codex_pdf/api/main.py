@@ -64,6 +64,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from codex_pdf.api.auth import authenticate
 from codex_pdf.api.blob_store import make_blob_store
 from codex_pdf.api.cache import cache_key, make_cache
+from codex_pdf.api.retention import (
+    make_retention_store,
+    normalise_tenant,
+    parse_retention_consent,
+)
 from codex_pdf.api.warmup import warmup_worker
 from codex_pdf.api.url_ingest import fetch_pdf_from_url
 from codex_pdf.color import (
@@ -163,6 +168,7 @@ def _record(endpoint: str, status_code: int, duration: float) -> None:
 
 _cache = make_cache()
 _blob_store = make_blob_store()
+_retention_store = make_retention_store()
 
 
 def _repo_root() -> Path:
@@ -790,7 +796,11 @@ def _pre_render_bg(raw: bytes) -> None:
 
 
 async def _extract_impl(
-    request: Request, pdf: UploadFile | None, *, endpoint_label: str
+    request: Request,
+    pdf: UploadFile | None,
+    *,
+    endpoint_label: str,
+    retain_form_value: str | None = None,
 ) -> JSONResponse:
     started = time.perf_counter()
     try:
@@ -805,6 +815,7 @@ async def _extract_impl(
             payload["pdf_sha256"] = sha
         # Warm the page-1 render cache in the background — don't block the response.
         asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw))
+        await _maybe_retain(request, raw, sha, payload, retain_form_value)
         _record(endpoint_label, 200, time.perf_counter() - started)
         return JSONResponse(payload)
     except HTTPException as exc:
@@ -819,21 +830,116 @@ async def _extract_impl(
         ) from exc
 
 
+async def _maybe_retain(
+    request: Request,
+    raw: bytes,
+    sha: str,
+    payload: dict[str, Any],
+    retain_form_value: str | None,
+) -> None:
+    """Audit-log the consent decision; persist to S3 if opted in.
+
+    Audit log fires on every extract regardless of consent so the
+    "off" path is observable. Persistence only runs when consent is
+    affirmative AND retention is configured. A persist failure logs
+    but does not break the extract response — the user already got
+    their answer.
+    """
+    decision = parse_retention_consent(
+        retain_form_value,
+        request.headers.get("x-compile-retain-for-training"),
+    )
+    tenant = normalise_tenant(request.headers.get("x-codex-tenant"))
+    request_id = request.headers.get("x-codex-request-id") or ""
+    configured = _retention_store is not None
+    logger.info(
+        "extract_consent decision=%s source=%s mismatch=%s tenant=%s sha=%s "
+        "request_id=%s retention_configured=%s",
+        decision.consent,
+        decision.source,
+        decision.mismatch,
+        tenant,
+        sha[:16],
+        request_id,
+        configured,
+    )
+    if not (decision.consent and _retention_store is not None):
+        return
+    try:
+        loop = asyncio.get_event_loop()
+        keys = await loop.run_in_executor(
+            None,
+            lambda: _retention_store.put(
+                pdf_bytes=raw,
+                extract_payload=payload,
+                request_id=request_id,
+                tenant=tenant,
+                sha256=sha,
+                codex_version=VERSION,
+                consent_source=decision.source,
+            ),
+        )
+        logger.info(
+            "extract_retained sha=%s tenant=%s keys=%s",
+            sha[:16],
+            tenant,
+            list(keys.values()),
+        )
+    except Exception:
+        logger.exception("retention persist failed sha=%s tenant=%s", sha[:16], tenant)
+
+
 @app.post("/extract", include_in_schema=False, dependencies=[Depends(authenticate)])
 async def extract_root_endpoint(
     request: Request,
     pdf: UploadFile | None = File(default=None),
+    retain_for_training: str | None = Form(default=None),
 ) -> JSONResponse:
-    return await _extract_impl(request, pdf, endpoint_label="extract")
+    return await _extract_impl(
+        request, pdf, endpoint_label="extract", retain_form_value=retain_for_training
+    )
 
 
 @app.post("/v1/extract", dependencies=[Depends(authenticate)])
 async def extract_endpoint(
     request: Request,
     pdf: UploadFile | None = File(default=None),
+    retain_for_training: str | None = Form(default=None),
 ) -> JSONResponse:
     """Extract a CodexDocument from an uploaded PDF or remote URL."""
-    return await _extract_impl(request, pdf, endpoint_label="extract")
+    return await _extract_impl(
+        request, pdf, endpoint_label="extract", retain_form_value=retain_for_training
+    )
+
+
+class _RetentionDeleteRequest(BaseModel):
+    sha256: str = Field(..., description="Lower-case hex SHA-256 of the PDF to erase.")
+
+
+@app.post("/v1/retention/delete", dependencies=[Depends(authenticate)])
+async def retention_delete_endpoint(payload: _RetentionDeleteRequest) -> JSONResponse:
+    """Erase every retained object for ``sha256`` (DSAR endpoint).
+
+    503 when retention is not configured (operator hasn't set
+    ``CODEX_RETAIN_BUCKET``). 400 on a malformed sha256. ``deleted=0``
+    when no objects matched — DSAR replay is idempotent, callers
+    don't need to distinguish "never stored" from "already erased".
+    """
+    if _retention_store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="retention not configured (CODEX_RETAIN_BUCKET unset)",
+        )
+    sha = payload.sha256.strip().lower()
+    loop = asyncio.get_event_loop()
+    try:
+        deleted = await loop.run_in_executor(None, _retention_store.delete, sha)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    logger.info("retention_delete sha=%s deleted=%d", sha[:16], deleted)
+    return JSONResponse({"sha256": sha, "deleted": deleted})
 
 
 async def _read_probe_pdf(request: Request, pdf: UploadFile | None) -> bytes:
