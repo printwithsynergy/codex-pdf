@@ -140,27 +140,36 @@ def test_polygon_intersect_triangles_via_clipper() -> None:
 
 @pytest.mark.skipif(not HAS_PYCLIPR, reason="pyclipr is required for polygon offset")
 def test_polygon_offset_triangle_spread_and_choke() -> None:
-    """Regression for pyclipr 0.1.8 ClipperOffset kwarg removal.
+    """Triangle offset returns correctly-sized rings.
 
-    Pre-fix this raised ``TypeError: __init__(): incompatible constructor
-    arguments`` because ``ClipperOffset(miterLimit=...)`` is no longer
-    accepted — the miter limit moved to a property set after construction.
-    Rectangular paths bypassed pyclipr entirely (rect fast-path), so the
-    bug was invisible without a triangle / pentagon exercise.
+    Covers two bugs the pre-1.7.x codex had:
+
+    1. ``ClipperOffset(miterLimit=...)`` raised ``TypeError`` under pyclipr
+       0.1.8 (constructor dropped all kwargs). Triggered only on non-
+       rectangular paths because rect inputs hit the fast-path bypass.
+    2. The integer-scale factor used for the offset distance (1e3) didn't
+       match the coord scale (1e6), so the effective offset was ×1000
+       smaller than the caller asked for — a 10-pt request grew the bbox
+       by ~0.01 pt. Assertions below check magnitude, not just direction,
+       to catch a future re-introduction.
     """
     triangle = Path.from_polygons([[(0.0, 0.0), (100.0, 0.0), (50.0, 100.0)]])
 
     spread = polygon_offset(triangle, 10.0)
     assert len(spread.rings) == 1
     sb = spread.bbox()
-    assert sb.x0 < 0.0 and sb.y0 < 0.0
-    assert sb.x1 > 100.0 and sb.y1 > 100.0
+    # A 10-pt spread should push the bbox at least ~9 pt outward on each
+    # side; miter-join geometry on a sharp triangle apex may extend the y
+    # max even further, so we only bound the *minimum* growth.
+    assert sb.x0 <= -9.0 and sb.y0 <= -9.0, f"spread bbox not wide enough: {sb}"
+    assert sb.x1 >= 109.0 and sb.y1 >= 109.0, f"spread bbox not tall enough: {sb}"
 
     choke = polygon_offset(triangle, -5.0)
     assert choke.rings
     cb = choke.bbox()
-    assert cb.x0 > 0.0 and cb.y0 > 0.0
-    assert cb.x1 < 100.0 and cb.y1 < 100.0
+    # 5-pt choke should pull each side inward by ≥ ~4 pt.
+    assert cb.x0 >= 4.0 and cb.y0 >= 4.0, f"choke bbox not inset enough: {cb}"
+    assert cb.x1 <= 96.0 and cb.y1 <= 96.0, f"choke bbox not inset enough: {cb}"
 
 
 # ---------------------------------------------------------------------------
