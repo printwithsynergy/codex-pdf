@@ -8,8 +8,9 @@ outputs deterministic, versioned, and backward-compatible.
 Before opening a PR, please confirm your change fits codex's lane
 (extraction / normalized facts / detection signals) rather than a
 display or rules concern. UI presentation belongs to **Loupe** and
-rule pass/fail logic belongs to **Lint** — see
-[`docs/service-ownership-contract.md`](./docs/service-ownership-contract.md).
+rule pass/fail logic belongs to **Lint** — see the "Service
+boundary", "Non-goals", and "Offshoot rule" sections of
+[`CLAUDE.md`](./CLAUDE.md).
 
 ## Local setup
 

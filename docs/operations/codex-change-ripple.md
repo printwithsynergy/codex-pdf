@@ -36,6 +36,7 @@ at build time, so a bare codex redeploy alone is not enough.
    - `lint-pdf-marketing` (lintpdf.com)
    - `loupe-pdf-marketing` (loupepdf.com)
    - `codex-pdf-marketing` (codexpdf.com)
+   - `compile-pdf-marketing` (compilepdf.com) — **beta**
 
 ## Trigger
 
@@ -53,10 +54,10 @@ After codex itself redeploys:
 
 ```bash
 curl -fsS https://codex-pdf-lint-sidecar-production.up.railway.app/v1/version | jq
-# {"version":"1.7.0"}
+# {"version":"1.8.1"}
 
 curl -fsS https://codex-edge.thinkneverland.workers.dev/edge/healthz | jq
-# {"status":"ok","origin_status":200,"origin_rtt_ms":...,"codex_version":"1.7.0"}
+# {"status":"ok","origin_status":200,"origin_rtt_ms":...,"codex_version":"1.8.1"}
 ```
 
 After each consumer redeploys, run its smoke script:

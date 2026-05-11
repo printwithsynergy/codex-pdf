@@ -38,6 +38,9 @@ mode for examples.
 | `POST /v1/geom/intersect` | geom | geom | polygon Boolean intersection |
 | `POST /v1/geom/union` | geom | geom | polygon Boolean union |
 | `POST /v1/geom/difference` | geom | geom | polygon Boolean difference |
+| `POST /v1/geom/offset` | geom | geom | polygon inset / outset by signed distance |
+| `POST /v1/color/neutral-density` | color | color | per-channel neutral density sample |
+| `POST /v1/retention/delete` | retention | extract | erase persisted PDF + extract + meta for an `sha256` from R2 (only meaningful when retention is configured — `CLAUDE.md` deployed surface §4) |
 | `GET /metrics` | meta | render | Prometheus metrics (when prometheus-client installed) |
 
 ## Schema sections + versioning
@@ -59,7 +62,7 @@ Sample contract response:
 {
   "contract_name": "codex-document",
   "schema_version": "1.1.0",
-  "package_version": "1.7.0",
+  "package_version": "1.8.1",
   "schema_id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
   "endpoints": ["POST /v1/extract", "POST /v1/probe", "POST /v1/extract/stream", "..."],
   "section_schema_versions": {
