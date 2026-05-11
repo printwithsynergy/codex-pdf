@@ -36,6 +36,7 @@ at build time, so a bare codex redeploy alone is not enough.
    - `lint-pdf-marketing` (lintpdf.com)
    - `loupe-pdf-marketing` (loupepdf.com)
    - `codex-pdf-marketing` (codexpdf.com)
+   - `compile-pdf-marketing` (compilepdf.com) — **beta**
 
 ## Trigger
 
