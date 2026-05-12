@@ -1,5 +1,32 @@
 # Schema Changelog
 
+## 1.14.0 — 2026-05-12
+
+Codex AI Signal Campaign — Phase 2 (operational contract). Per-
+tenant entitlements for the AI signal lane. **Schema unchanged at
+1.3.0**.
+
+### New env knobs
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_AI_TENANTS_ALLOWLIST` | unset | Comma-separated tenant slugs. When set, ONLY these tenants can run AI; everyone else gets `ai_tenant_excluded`. |
+| `CODEX_AI_TENANTS_DENYLIST` | unset | Comma-separated tenant slugs blocked from AI. Allowlist wins when both are set. |
+
+### New warning code
+
+- `ai_tenant_excluded` — operator opted in but the requesting
+  tenant is gated out by allowlist / denylist. Signal fields stay
+  empty.
+
+### Cache tenancy
+
+Per-kind cache keys (`codex:{VERSION}:signal:{tenant}:{pdf_hash}:{kind}[:p{idx}]`)
+already namespace by tenant. Cross-tenant isolation was an
+invariant of the 1.10.0 contract; Phase 2 just adds the test
+that proves tenant A's signal data never leaks to tenant B even
+when they upload identical PDFs.
+
 ## 1.12.0 — 2026-05-12
 
 Codex AI Signal Campaign — Phase 1.5 (codex-vision-sidecar). New

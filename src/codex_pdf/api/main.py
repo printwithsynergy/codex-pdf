@@ -969,7 +969,9 @@ async def _extract_impl(
         # mutate the payload in place. ``extra_warnings`` covers
         # partial completion (cost cap hit mid-run).
         extra_ai_warnings: list[dict[str, str]] = []
-        ai_context = build_context(caller_skipped=_ai_skipped(request))
+        ai_context = build_context(
+            caller_skipped=_ai_skipped(request), tenant=tenant
+        )
         if isinstance(payload, dict):
             if ai_context.runnable:
                 def _run_ai() -> list[dict[str, str]]:
@@ -1003,6 +1005,7 @@ async def _extract_impl(
                 ai_ran=ai_context.runnable,
                 cost_spent_usd=ai_context.budget.spent_usd,
                 extra_warnings=extra_ai_warnings,
+                tenant=tenant,
             )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         durations = {"extract": elapsed_ms}
@@ -1880,6 +1883,22 @@ _AI_TIER_MESSAGE = (
 )
 
 
+def _ai_tenant_excluded(tenant: str) -> bool:
+    """Mirror of :func:`codex_pdf.ai.context._tenant_entitled` for the
+    API layer (which needs the answer without building a full
+    context). Returns ``True`` when the operator's entitlement
+    config excludes this tenant from AI signals."""
+    allowlist_raw = (os.environ.get("CODEX_AI_TENANTS_ALLOWLIST") or "").strip()
+    if allowlist_raw:
+        allowed = {t.strip() for t in allowlist_raw.split(",") if t.strip()}
+        return tenant not in allowed
+    denylist_raw = (os.environ.get("CODEX_AI_TENANTS_DENYLIST") or "").strip()
+    if denylist_raw:
+        denied = {t.strip() for t in denylist_raw.split(",") if t.strip()}
+        return tenant in denied
+    return False
+
+
 def _annotate_ai_status(
     payload: dict[str, Any],
     request: Request,
@@ -1887,6 +1906,7 @@ def _annotate_ai_status(
     ai_ran: bool,
     cost_spent_usd: float = 0.0,
     extra_warnings: list[dict[str, str]] | None = None,
+    tenant: str = "default",
 ) -> None:
     """Append an AI-status ``CodexWarning`` to the extract response.
 
@@ -1904,6 +1924,7 @@ def _annotate_ai_status(
     """
     operator_on = _ai_enabled()
     caller_off = _ai_skipped(request)
+    tenant_excluded = operator_on and _ai_tenant_excluded(tenant)
     if not operator_on:
         warning = {
             "code": "ai_disabled",
@@ -1913,6 +1934,16 @@ def _annotate_ai_status(
                 "detected_logos, detected_symbols, detected_barcodes, "
                 "spell_candidates, and document_classification remain "
                 "empty regardless of caller intent."
+            ),
+            "scope": "signals.ai",
+        }
+    elif tenant_excluded:
+        warning = {
+            "code": "ai_tenant_excluded",
+            "message": (
+                f"AI signal extraction is not enabled for tenant {tenant!r} "
+                "on this deployment (gated by CODEX_AI_TENANTS_ALLOWLIST "
+                "or CODEX_AI_TENANTS_DENYLIST). Signal fields stay empty."
             ),
             "scope": "signals.ai",
         }
@@ -2037,7 +2068,7 @@ async def signal_endpoint(
     started = time.perf_counter()
     tenant = _request_tenant(request)
     _enforce_rate_limit(tenant, "signal")
-    ai_context = build_context(caller_skipped=_ai_skipped(request))
+    ai_context = build_context(caller_skipped=_ai_skipped(request), tenant=tenant)
     ai_status_label: Literal["enabled", "disabled", "skipped"]
     if not _ai_enabled():
         ai_status_label = "disabled"

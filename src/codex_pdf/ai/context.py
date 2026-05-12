@@ -19,7 +19,9 @@ from typing import Literal
 
 from codex_pdf.ai.budget import AiBudget
 
-AiStatus = Literal["enabled", "disabled", "skipped", "missing_credentials"]
+AiStatus = Literal[
+    "enabled", "disabled", "skipped", "missing_credentials", "tenant_excluded"
+]
 
 
 @dataclass
@@ -51,6 +53,33 @@ def _ai_enabled() -> bool:
     return raw in {"true", "1", "yes", "on"}
 
 
+def _tenant_entitled(tenant: str | None) -> bool:
+    """Per-tenant AI entitlement gate.
+
+    Two env vars compose the decision:
+
+    - ``CODEX_AI_TENANTS_ALLOWLIST`` (comma-separated) — when set, ONLY
+      these tenants can run AI; everyone else falls back to
+      ``tenant_excluded``. Useful for staging AI on a single pilot
+      tenant before rollout.
+    - ``CODEX_AI_TENANTS_DENYLIST`` (comma-separated) — when set, the
+      named tenants are blocked. Allowlist wins when both are set.
+
+    Unset (the default) means every tenant is entitled.
+    """
+    if not tenant:
+        return True
+    allowlist_raw = (os.environ.get("CODEX_AI_TENANTS_ALLOWLIST") or "").strip()
+    if allowlist_raw:
+        allowed = {t.strip() for t in allowlist_raw.split(",") if t.strip()}
+        return tenant in allowed
+    denylist_raw = (os.environ.get("CODEX_AI_TENANTS_DENYLIST") or "").strip()
+    if denylist_raw:
+        denied = {t.strip() for t in denylist_raw.split(",") if t.strip()}
+        return tenant not in denied
+    return True
+
+
 def _claude_available() -> bool:
     """Both the SDK package and an API key must be present.
 
@@ -77,17 +106,22 @@ def _gpu_config() -> tuple[str | None, str | None]:
     return url, auth
 
 
-def build_context(*, caller_skipped: bool) -> AiContext:
+def build_context(*, caller_skipped: bool, tenant: str | None = None) -> AiContext:
     """Build an :class:`AiContext` from environment + caller intent.
 
     Caller-skipped is computed by the API layer (which has access to
     request headers) and passed in as a boolean so this module stays
-    framework-agnostic.
+    framework-agnostic. ``tenant`` is the normalised tenant slug from
+    ``X-Codex-Tenant``; entitlement is checked against the
+    ``CODEX_AI_TENANTS_ALLOWLIST`` / ``CODEX_AI_TENANTS_DENYLIST``
+    env knobs (see :func:`_tenant_entitled`).
     """
     if not _ai_enabled():
         return AiContext(status="disabled")
     if caller_skipped:
         return AiContext(status="skipped")
+    if not _tenant_entitled(tenant):
+        return AiContext(status="tenant_excluded")
     if not _claude_available():
         return AiContext(status="missing_credentials")
     gpu_url, gpu_auth = _gpu_config()

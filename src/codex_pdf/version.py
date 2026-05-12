@@ -1,5 +1,20 @@
 """Package version.
 
+1.14.0 (minor): AI Signal Campaign — Phase 2 (operational
+contract). Per-tenant entitlements for the AI signal lane.
+
+Two new operator knobs:
+
+- ``CODEX_AI_TENANTS_ALLOWLIST`` — comma-separated tenant slugs.
+  When set, ONLY these tenants run AI; everyone else gets
+  ``ai_tenant_excluded``. Useful for piloting AI on a single
+  customer before rolling it out fleet-wide.
+- ``CODEX_AI_TENANTS_DENYLIST`` — block specific tenants. Allowlist
+  wins when both are set.
+
+New warning code: ``ai_tenant_excluded``. Schema unchanged at
+1.3.0.
+
 1.12.0 (minor): AI Signal Campaign — Phase 1.5 lands the codex-
 vision-sidecar. A new :mod:`codex_pdf.vision` package ships a
 FastAPI service (``python -m codex_pdf.vision``) plus the HTTP
@@ -103,5 +118,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.13.0"
+VERSION = "1.14.0"
 __version__ = VERSION
