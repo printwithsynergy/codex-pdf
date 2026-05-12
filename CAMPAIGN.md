@@ -774,18 +774,19 @@ Carried over from the unified extraction campaign:
 
 ## Phase Plan
 
-- [x] Phase 0 — Contract freeze (1.10.0, merged)
+- [x] Phase 0 — Contract freeze (1.10.0)
 - [x] Phase 1 — Implementations (Claude-backed extractors) — 1.11.0
-- [ ] Phase 1.5 — codex-vision-sidecar (CPU ONNX HTTP service for
-      CLIP / NudeNet / perceptual hashing without GPU spend)
-- [ ] Phase 2 — Operational contract (tenancy isolation for AI
-      cache, per-tenant AI entitlements, rate-limit dimension for
-      AI compute)
-- [ ] Phase 3 — Consumer rollout (lint migrates `AI_*` rules to
-      signal readers; loupe surfaces language / logo badges;
-      compile gates producers on detected dielines)
-- [ ] Phase 4 — Long-tail (model versioning policy, prompt-version
-      header, cost-cap evictions, NSFW / specialised lanes)
+- [x] Phase 1.5 — codex-vision-sidecar (CPU ONNX HTTP service) — 1.12.0
+- [x] Phase 4 — Model versioning + AI signal SLOs — 1.13.0
+- [x] Phase 2 — Operational contract (per-tenant entitlements) — 1.14.0
+- [x] Phase 3 — Consumer rollout: lint-pdf 0.1.0b16 ``codex_signals_*``
+      reader analyzers; loupe-pdf 0.3.0-beta.71 built-in
+      ``FindingsSidebar`` + ``splitFindingsByLocation``
+- [x] Post-1 — Dieline.count root cause: codex 1.15.0 synthesises
+      a candidate when the bbox geometry path detects a size so
+      ``dieline.count`` agrees with ``dieline.size``. Lint-pdf
+      0.1.0b18 ignores the synthesised candidate so its own
+      name-match / geometry-fallback pathways still run.
 
 ## Phase 1 — 2026-05-12 — 1.11.0 — Implementations shipped
 
