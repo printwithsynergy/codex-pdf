@@ -49,7 +49,7 @@ Draft PRs only.
   limits, parity) — PR #19 (merged `d79cbad`), rc.2 cut _pending_
 - [x] Phase 3 — Consumer rollout + observability — PR #21
   (merged `a19a364`), rc.3 cut _pending_
-- [ ] Phase 4 — Long-tail (versioning, eviction, SLOs)
+- [x] Phase 4 — Long-tail (versioning, eviction, SLOs) — PR _pending_
 - [ ] Synthesis — Emit consumer + marketing prompts
 
 ## Phase Log
@@ -376,27 +376,68 @@ clients + observability surfaces.
 
 **Decisions owed:** _none_.
 
-## Next Phase — Plan (for `next` invocation)
+### Phase 4 — 2026-05-12 — PR _pending_
 
-**Phase 4 — Long-tail.**
+**Shipped:**
+- ``ConformanceProfile`` enum versioning policy formalised in
+  ``docs/policies.md``. Forward-compatible by contract: adding a
+  profile is a minor bump; removing or renaming is a major bump
+  (we have committed to not do this within the 1.x line).
+- Cache TTL knob: ``CODEX_CACHE_TTL_SECONDS`` (default 86400 /
+  24h) is the single source of truth for derived-artifact
+  lifetime on the Redis backend. ``MemoryCache`` stays LRU-only
+  by design — process memory is bounded by bytes, not time. A
+  garbage env value falls back to the default with a warning so
+  service boot can't break on a typo.
+- Backpressure model documented (``policies.md``): rate-limit
+  ``429`` + ``Retry-After`` is the only shed-response codex
+  emits as a deliberate signal; consumers MUST honour
+  ``Retry-After``. ``503`` is reserved for hard failures.
+  Executor-pool saturation surfaces as request-side timeouts —
+  noted as known limitation, distributed (Redis-backed) limiter
+  on the roadmap.
+- SLOs published in ``docs/slos.md``: availability targets
+  (99.5–99.95% by surface), warm/cold p50/p95/p99 latency tables
+  per endpoint, recommended alert lanes (slow vs failing),
+  cache-hit-rate floors per endpoint, recommended Prometheus
+  query templates.
 
-- ``ConformanceProfile`` enum versioning policy. Document how
-  consumers handle unknown profile keys (already the contract;
-  formalise the SLA).
-- Cache eviction / TTL policy. Today the cache backends (memory
-  LRU; Redis SETEX) have their own TTLs; centralise the policy
-  knob.
-- Backpressure on conformance compute queue. Currently the rate
-  limiter sheds excess load; we may want a 503 with backpressure
-  semantics for downstream fairness.
-- SLOs published. Define + publish p95 latency + availability
-  SLOs per endpoint; wire alerts.
+**Deferred:**
+- Real distributed rate-limit accounting (Redis token bucket).
+  Tracked as a roadmap item; in-process limiter is fine for the
+  rc.x window and the immediate post-1.9.0 deploy.
+- 503-as-backpressure semantics. Held off intentionally because
+  it changes the contract surface — consumers already know how to
+  handle 429. Revisit when distributed accounting lands.
+- Cold-cache p95 reduction. SLO targets capture today's reality;
+  the speculator + edge cache already mitigate most cold-PDF
+  scenarios. Further reduction (e.g. background warmups for
+  predicted demand) is post-1.9.0 product work.
 
-No blockers. Phase 3 is complete: consumers can wire against a
-documented surface today using `1.9.0-rc.3` (cut after this PR
-merges) or the eventual `1.9.0` final.
+**Learned:**
+- Centralising TTL behind one env knob simplifies the operator
+  story (one number to tune instead of two backends to reason
+  about), at the cost of MemoryCache ignoring the knob — but
+  that's an honest reflection of reality (in-process LRU has
+  size, not time, semantics). Document, don't pretend.
+- Publishing SLOs as a doc (not a code-level contract) gives
+  operators alert recipes without committing the service to
+  numbers it can't yet hit. The rc.x series builds against the
+  targets; final 1.9.0 ships when the deployed surface meets
+  them.
 
-**Synthesis is now eligible.** With Phase 3 complete, the
-playbook's `synthesize` invocation can run to emit wave-ordered
-consumer + marketing-site prompts. Synthesis was deferred until
-"impls stabilise"; they have.
+**Decisions owed:** _none_.
+
+## Next Phase — Plan
+
+All planned phases are complete. The playbook's remaining
+invocation is **`synthesize`** — scan the eight repos and emit
+wave-ordered consumer + marketing-site prompts for downstream
+integration work. Synthesis was gated on "impls stabilise"; with
+Phase 4 done, that gate is open.
+
+A final `1.9.0` (non-rc) cut should follow once Phase 4 lands and
+soaks. The remaining post-1.9.0 work (real distributed rate
+limit, generated SDKs in other languages, bulk OpenAPI
+`responses=` cleanup for older endpoints) lives outside the
+campaign — it's regular product work.

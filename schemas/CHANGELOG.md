@@ -1,5 +1,39 @@
 # Schema Changelog
 
+## Unreleased
+
+Phase 4 of the unified extraction campaign — long-tail policies.
+No new endpoints; this release formalises operator + consumer
+SLAs and adds one operator-facing knob.
+
+### Cache TTL knob
+
+`CODEX_CACHE_TTL_SECONDS` (default `86400` / 24h) is now the
+single source of truth for the Redis cache's SETEX TTL.
+`MemoryCache` ignores the knob and stays LRU-only — process
+memory is bounded by bytes, not time. A garbage env value falls
+back to the default with a warning so service boot can't break
+on a typo.
+
+### Policy SLAs
+
+- `docs/policies.md` — `ConformanceProfile` enum versioning,
+  cache TTL semantics, backpressure model, observability
+  conventions. Documents what consumers can rely on across
+  releases.
+- `docs/slos.md` — published p50/p95/p99 latency targets,
+  availability targets, recommended alert lanes, cache-hit-rate
+  floors. Operators wire dashboards + alerts against the table;
+  consumers size their own SLOs against codex's published
+  numbers.
+
+### Backpressure (model unchanged)
+
+The `429 + Retry-After` shed-response from Phase 2's rate limiter
+is the only deliberate backpressure signal codex emits.
+Distributed (Redis-backed) accounting is on the roadmap;
+in-process limiter remains per-replica.
+
 ## 1.9.0-rc.3 — 2026-05-12
 
 Phase 3 of the unified extraction campaign — consumer rollout +

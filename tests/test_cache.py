@@ -203,3 +203,53 @@ def test_redis_cache_get_failure_is_a_miss(monkeypatch: pytest.MonkeyPatch) -> N
     assert isinstance(cache, RedisCache)
     assert cache.get("any") is None  # silent miss
     cache.set("any", b"v")  # silent skip — must not raise
+
+
+def test_cache_ttl_env_knob(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``CODEX_CACHE_TTL_SECONDS`` overrides the Redis TTL."""
+    pytest.importorskip("redis")
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.last_ex: int | None = None
+
+        def ping(self) -> bool:
+            return True
+
+        def set(self, _k: str, _v: bytes, ex: int | None = None) -> None:
+            self.last_ex = ex
+
+        def get(self, _k: str) -> bytes | None:
+            return None
+
+    captured: FakeClient | None = None
+
+    def fake_from_url(*_args: Any, **_kwargs: Any) -> FakeClient:
+        nonlocal captured
+        captured = FakeClient()
+        return captured
+
+    import redis  # type: ignore
+
+    monkeypatch.setattr(redis.Redis, "from_url", staticmethod(fake_from_url))
+    monkeypatch.setenv("CODEX_REDIS_URL", "redis://example.com:6379/0")
+    monkeypatch.setenv("CODEX_CACHE_TTL_SECONDS", "42")
+
+    cache = make_cache()
+    assert isinstance(cache, RedisCache)
+    cache.set("k", b"v")
+    assert captured is not None
+    assert captured.last_ex == 42
+
+
+def test_cache_ttl_env_knob_falls_back_on_garbage(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A typo'd TTL env value falls back to the documented default."""
+    monkeypatch.setenv("CODEX_CACHE_TTL_SECONDS", "not-a-number")
+    from codex_pdf.api.cache import _ttl_from_env
+
+    with caplog.at_level(logging.WARNING):
+        ttl = _ttl_from_env()
+    assert ttl == 86400
+    assert any("CODEX_CACHE_TTL_SECONDS" in msg for msg in caplog.messages)
