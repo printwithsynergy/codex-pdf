@@ -306,10 +306,277 @@ operators upgrading from rc.1 see cold caches on first request.
 
 ## Synthesis Output
 
-Not yet produced. Populated by the `synthesize` invocation once
-implementations stabilise. Phase 2 is now the right moment — rc.2
-(or 1.9.0 final) makes the operational contract concrete for
-consumers to wire against.
+_Produced 2026-05-12 — post `1.9.0` cut._
+
+### Discovery summary
+
+| Repo | Consumes | Current pin | Classification |
+| --- | --- | --- | --- |
+| `codex-pdf` | (self) | n/a | Wave 1 — DONE (`1.9.0` on PyPI + npm `latest`). |
+| `codex-pdf-marketing` | `@printwithsynergy/codex-client` | `^1.7.0` | Wave 1 — FLAG_FLIP. |
+| `loupe-pdf` | _no codex deps_ | n/a | Wave 2 — **NO_OP**. |
+| `loupe-pdf-marketing` | `@printwithsynergy/codex-client` | `^1.6.1` (caret auto-accepts 1.9.0) | Wave 2 — **NO_OP**. |
+| `lint-pdf` | `codex-pdf` | `>=1.4.4` | Wave 3 — INTEGRATE (flag-flip already prepared in lint-pdf#482). |
+| `compile-pdf` | `codex-pdf` | `>=1.8.1,<2.0` | Wave 3 — FLAG_FLIP. |
+| `lint-pdf-marketing` | `@printwithsynergy/codex-client` | `1.8.1` (exact) | Wave 3 — FLAG_FLIP. |
+| `compile-pdf-marketing` | `@printwithsynergy/codex-client` | `^1.8.1` | Wave 3 — FLAG_FLIP. |
+
+**Loupe is NO_OP** — Wave 2 collapses. Wave 3 preconditions
+reference only the codex bump (no loupe version gate).
+
+### Wave-grouped summary
+
+```
+Wave 1 — Codex (done) + codex marketing
+  printwithsynergy/codex-pdf               DONE              prompt: no
+  printwithsynergy/codex-pdf-marketing     FLAG_FLIP         prompt: yes
+
+Wave 2 — Loupe (empty — NO_OP)
+  printwithsynergy/loupe-pdf               NO_OP             prompt: no
+  printwithsynergy/loupe-pdf-marketing     NO_OP             prompt: no
+
+Wave 3 — Consumers (gated on Wave 1 only; loupe collapsed)
+  printwithsynergy/lint-pdf                INTEGRATE         prompt: yes
+  printwithsynergy/compile-pdf             FLAG_FLIP         prompt: yes
+  printwithsynergy/lint-pdf-marketing      FLAG_FLIP         prompt: yes
+  printwithsynergy/compile-pdf-marketing   FLAG_FLIP         prompt: yes
+```
+
+---
+
+### Wave 1 — codex marketing
+
+#### Prompt for `printwithsynergy/codex-pdf-marketing`
+
+```
+PRECONDITION: codex-pdf@1.9.0 is published (PyPI + npm `latest`).
+Verify with `npm view @printwithsynergy/codex-client@1.9.0`
+before opening a PR.
+
+Branch: bump-codex-client-1.9.0
+
+What changed upstream
+codex-pdf@1.9.0 completes the unified extraction campaign. The TS
+client gained tenant scoping (X-Codex-Tenant header), Retry-After
+awareness on 429, and three new endpoint methods
+(getTextRegions / computeConformance / listRenders). Surface
+additive — existing call sites continue to work.
+
+Files to touch
+- package.json: bump `@printwithsynergy/codex-client` from
+  `^1.7.0` to `^1.9.0` (or `1.9.0` if you pin exact).
+- pnpm-lock.yaml: regenerate via `pnpm install`.
+- scripts/smoke-codex-extract.mjs: run it locally and confirm it
+  still passes against the deployed codex-pdf-lint-sidecar.
+  No code change expected — additive surface.
+- src/lib/oss-projects.ts / src/pages/projects.astro: update any
+  codex version-string references (search for "1.7.0" or
+  "1.8.x").
+- src/pages/docs/index.astro: if a "what's new" callout is in
+  rotation, add 1.9.0 (tenancy, rate limit, observability,
+  policies). docs/unified-extraction.md + docs/policies.md +
+  docs/slos.md in codex-pdf/main are the canonical sources.
+
+Behavior-locking test before the change
+Snapshot the rendered `/projects` page. Diff after the bump —
+content should be identical except where you explicitly added
+1.9.0 callouts.
+
+Rules
+- Draft PR only.
+- No --no-verify, --no-gpg-sign, --accept-data-loss.
+- New commits only; never amend a pushed commit.
+```
+
+---
+
+### Wave 2 — loupe (NO_OP)
+
+Loupe-pdf consumes neither `codex-pdf` nor
+`@printwithsynergy/codex-client`. Loupe-pdf-marketing's caret pin
+(`^1.6.1`) already auto-accepts `1.9.0` on the next
+`pnpm install`; the existing surface still works unchanged. **No
+prompts emitted.**
+
+---
+
+### Wave 3 — consumers (gated on Wave 1 only)
+
+#### Prompt for `printwithsynergy/lint-pdf`
+
+```
+PRECONDITION: codex-pdf@1.9.0 is published. Verify with
+`pip index versions codex-pdf` before opening a PR.
+(Loupe is NO_OP for codex; no loupe version gate.)
+
+Branch: bump-codex-1.9.0
+
+What changed upstream
+codex-pdf@1.9.0 completes the unified extraction campaign.
+- New endpoints (Phase 1, real impls in 1.9.0):
+  GET /v1/documents/{pdf_hash}/text-regions
+  POST /v1/documents/{document_id}/conformance/{profile}
+  GET /v1/documents/{pdf_hash}/renders
+- Stage telemetry on every response (`stage_durations_ms` +
+  `X-Codex-Stage-Durations-Ms` header).
+- Tenancy via `X-Codex-Tenant` header (server scopes cache +
+  blob store per tenant).
+- Rate limit (`429 + Retry-After`) on compute-and-cache POSTs.
+- TTL knob: `CODEX_CACHE_TTL_SECONDS`.
+- Bundled Python client gained `tenant` ctor kw, the three new
+  endpoint methods, and Retry-After-aware retries.
+
+Files to touch (already discovered in lint-pdf)
+- pyproject.toml: bump `codex-pdf>=1.4.4` to `codex-pdf>=1.9.0`.
+- src/lintpdf/codex_client.py: confirm the HTTP-backed client
+  paths now reach the real endpoints (no more 501). Update the
+  feature flag default if Phase 1.5 confirmed sync mode on the
+  conformance endpoint (it did — p95 ≤ 14 ms).
+- src/lintpdf/codex_adapter.py: collapse the noop fallback if
+  every code path now has HTTP coverage.
+- Tests that import codex_client: add a tenant-scoped test
+  alongside the existing ones to lock the new header.
+
+Behavior-locking test before the change
+Snapshot test against the existing preflight pipeline for a
+representative fixture corpus. The diff after the bump should be
+empty for "no codex" mode and structurally identical for "codex
+on" mode (the response shape is additive only).
+
+Rules
+- Draft PR only.
+- No --no-verify, --no-gpg-sign, --accept-data-loss.
+- New commits only; never amend a pushed commit.
+```
+
+#### Prompt for `printwithsynergy/compile-pdf`
+
+```
+PRECONDITION: codex-pdf@1.9.0 is published. Verify with
+`pip index versions codex-pdf` before opening a PR.
+
+Branch: bump-codex-1.9.0
+
+What changed upstream
+codex-pdf@1.9.0 completes the unified extraction campaign. Schema
+moved from 1.0.0 → 1.2.0 (additive). The published surface is
+identical to 1.9.0-rc.3 (which compile-pdf can already pull via
+the existing `codex-pdf>=1.8.1,<2.0` range, but you should bump
+the floor for clarity and to opt into the new surface
+explicitly).
+
+Files to touch (already discovered in compile-pdf)
+- pyproject.toml: bump `codex-pdf>=1.8.1,<2.0` to
+  `codex-pdf>=1.9.0,<2.0`.
+- src/compile_pdf/version.py: bump
+  `CODEX_DOCUMENT_SCHEMA_VERSION_PIN` to `1.2.0` (was `1.0.0`).
+  This is the version compile-pdf advertises in its
+  `/v1/contract` response.
+- scripts/consume_surface_audit.py: re-run; should pass because
+  compile-pdf only reads codex outputs (no producer surface).
+
+Behavior-locking test before the change
+The compile-pdf golden test corpus already runs against codex's
+extract — snapshot the output, bump, snapshot again, diff. Any
+delta is from the additive fields (detected_text_regions,
+stage_durations_ms, conformance_verdicts). Pin those into the
+expected snapshot or filter them out — don't silently accept.
+
+Rules
+- Draft PR only.
+- No --no-verify, --no-gpg-sign, --accept-data-loss.
+- New commits only; never amend a pushed commit.
+```
+
+#### Prompt for `printwithsynergy/lint-pdf-marketing`
+
+```
+PRECONDITION: @printwithsynergy/codex-client@1.9.0 is on the
+npm `latest` dist-tag. Verify with `npm view
+@printwithsynergy/codex-client dist-tags` before opening a PR.
+
+Branch: bump-codex-client-1.9.0
+
+What changed upstream
+TS client now ships:
+- `tenant` constructor option → `X-Codex-Tenant` header (also
+  reads `CODEX_TENANT` env).
+- `getTextRegions`, `computeConformance`, `listRenders` methods.
+- 429 retries honour `Retry-After`.
+
+Files to touch (already discovered in lint-pdf-marketing)
+- package.json: bump `@printwithsynergy/codex-client` from
+  `1.8.1` to `1.9.0` (currently an exact pin).
+- pnpm-lock.yaml: regenerate via `pnpm install`.
+- scripts/smoke-codex-extract.mjs: run locally. No code change
+  expected (additive surface), but worth confirming.
+- src/lib/codex.ts: if it instantiates `HttpClient`, consider
+  passing `tenant` from env (`CODEX_TENANT`) so the marketing
+  demo lands in a separate cache slot from the lint-pdf
+  production tenant. Optional; default tenant works.
+- src/components/DemoExperience.tsx: if the demo shows
+  per-stage timings, surface `stage_durations_ms` from the
+  extract response.
+
+Behavior-locking test before the change
+Smoke `scripts/smoke-codex-extract.mjs` before and after; diff
+should be empty save for any explicit new feature usage.
+
+Rules
+- Draft PR only.
+- No --no-verify, --no-gpg-sign, --accept-data-loss.
+- New commits only; never amend a pushed commit.
+```
+
+#### Prompt for `printwithsynergy/compile-pdf-marketing`
+
+```
+PRECONDITION: @printwithsynergy/codex-client@1.9.0 is on the
+npm `latest` dist-tag. Verify with `npm view
+@printwithsynergy/codex-client dist-tags` before opening a PR.
+
+Branch: bump-codex-client-1.9.0
+
+What changed upstream
+TS client gained tenant support, Retry-After awareness, and three
+new endpoint methods. Surface additive — existing call sites
+continue to work.
+
+Files to touch (already discovered in compile-pdf-marketing)
+- package.json: bump `@printwithsynergy/codex-client` from
+  `^1.8.1` to `^1.9.0` (caret already accepts 1.9.0; bumping
+  the floor makes the intent explicit).
+- pnpm-lock.yaml: regenerate via `pnpm install`.
+- CHANGELOG.md / src/content/changelog/*: optional release-note
+  entry if the marketing site tracks consumed-version changes.
+
+Behavior-locking test before the change
+No app-level test exists for the codex client here; rely on
+`pnpm typecheck` + `pnpm build` to confirm the bump compiles.
+The codex sidecar's smoke script (if any) should also pass.
+
+Rules
+- Draft PR only.
+- No --no-verify, --no-gpg-sign, --accept-data-loss.
+- New commits only; never amend a pushed commit.
+```
+
+---
+
+### Cross-wave consistency check
+
+Per playbook discipline, re-read the Wave 2 prompts before
+emitting Wave 3. Wave 2 has no prompts (loupe NO_OP), and no
+loupe public API surface changed in this campaign — so Wave 3
+needs no loupe-related call-site updates. Confirmed.
+
+### What to do with this output
+
+Paste each prompt into a fresh Claude Code session (or the
+designated downstream worker) scoped to the corresponding repo.
+Each prompt is self-contained: branch name, files to touch,
+behavior-locking test, sandbox rules. Wave 3 prompts can run in
+parallel — they share only the upstream codex version.
 
 ### Phase 3 — 2026-05-12 — PR #21 — merged
 
