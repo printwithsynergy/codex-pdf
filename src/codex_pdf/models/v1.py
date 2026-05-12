@@ -519,7 +519,19 @@ class CodexSummarySpotColorMetrics(BaseModel):
 
 class CodexSummaryDielineCandidate(BaseModel):
     name: str
-    source: Literal["ocg_name", "ocg_processing_step", "trap_layer", "analysis_signal"]
+    # ``analysis_stroke_bbox`` is the bbox-based geometry-only path —
+    # used when none of the named-layer / trap-layer / analysis-signal
+    # paths produced a candidate but ``size`` was still derivable from
+    # stroked-path bboxes across pages. Consumers MUST treat the
+    # Literal set as forward-compatible (open enum) so older clients
+    # don't break against newer servers.
+    source: Literal[
+        "ocg_name",
+        "ocg_processing_step",
+        "trap_layer",
+        "analysis_signal",
+        "analysis_stroke_bbox",
+    ]
     ocg_id: str | None = None
     processing_step: str | None = None
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -534,6 +546,7 @@ class CodexSummaryDielineCandidate(BaseModel):
             "analysis_stroke_dominant",
             "analysis_dense_path_network",
             "analysis_low_fill_ratio",
+            "geometry_fallback_size_detected",
         ]
     ] = Field(default_factory=list)
 

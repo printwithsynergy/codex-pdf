@@ -100,14 +100,21 @@ def test_dieline_summary_overall_confidence_defaults_to_zero() -> None:
 
 def test_dieline_size_confidence_uses_geometry_fallback_when_no_candidates() -> None:
     # Geometry can still produce dimensions even when no strong dieline signals were detected.
+    # Per the 1.15.0 root-cause fix, the bbox-based size detection now also
+    # synthesises a candidate so count == 1 and the candidates array is
+    # non-empty — consumers no longer see "Dieline candidates: 0"
+    # alongside "Detected dieline size 4.98 x 6.53 in".
     ops = [
         {"op": "m", "operands": [0, 0]},
         {"op": "l", "operands": [144, 72]},
         {"op": "S", "operands": []},
     ]
     summary = build_document_summary(_doc_with_analysis({"page_1": {"content_ops": ops}}))
-    assert summary.dieline.count == 0
-    assert summary.dieline.overall_confidence == 0.0
+    assert summary.dieline.count == 1
+    assert len(summary.dieline.candidates) == 1
+    assert summary.dieline.candidates[0].source == "analysis_stroke_bbox"
+    assert summary.dieline.candidates[0].reason_codes == ["geometry_fallback_size_detected"]
+    assert summary.dieline.overall_confidence > 0.0
     assert summary.dieline.size.available is True
     assert summary.dieline.size.source == "analysis_stroke_bbox"
     assert summary.dieline.size.confidence > 0.0
