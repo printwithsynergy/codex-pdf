@@ -30,8 +30,10 @@ from __future__ import annotations
 from codex_pdf.ai.budget import AiBudget, AiBudgetExceededError
 from codex_pdf.ai.context import AiContext, AiStatus, build_context
 from codex_pdf.ai.dispatcher import run_signal, run_signals_on_document
+from codex_pdf.ai.versions import AI_MODEL_VERSIONS
 
 __all__ = [
+    "AI_MODEL_VERSIONS",
     "AiBudget",
     "AiBudgetExceededError",
     "AiContext",
