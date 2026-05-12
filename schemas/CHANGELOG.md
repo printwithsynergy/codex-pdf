@@ -1,5 +1,56 @@
 # Schema Changelog
 
+## Unreleased
+
+Phase 2 of the unified extraction campaign — operational contract
+hardening. No new endpoints; this release tightens what the
+existing endpoints do under load and across tenants.
+
+### Tenancy
+
+Cache lookups are now scoped by tenant. Cache key shape changes
+from
+``codex:{VERSION}:{kind}:{pdf_sha}:{args_sha}``
+to
+``codex:{VERSION}:{kind}:{tenant}:{pdf_sha}:{args_sha}``
+The ``X-Codex-Tenant`` request header selects the tenant; missing
+or malformed values fall back to ``"default"``. This applies to
+the blob store and the renders index as well — a hash uploaded
+by Tenant A is invisible to Tenant B even if the hash is known.
+
+This is a deliberate cache-key break and acceptable on pre-release.
+Operators upgrading from ``rc.1`` will see cold caches on first
+request after the deploy.
+
+### Error-shape catalogue
+
+Shared ``ErrorResponse`` envelope (``{"detail": "..."}``) for all
+4xx/5xx responses. Phase 1 endpoints (text-regions, conformance,
+renders) document their per-status error shapes in OpenAPI under
+``responses=``. Consumers can drive UI states off the documented
+catalogue without trial-and-error.
+
+### Rate limits
+
+Compute-and-cache POSTs (extract, render, sample, walk,
+conformance) consult a process-wide token bucket per ``(tenant,
+endpoint)``. Bucket is exhausted → ``429 Too Many Requests`` with
+a ``Retry-After`` header. Env knobs:
+
+- ``CODEX_RATE_LIMIT_RPM`` (default ``120``)
+- ``CODEX_RATE_LIMIT_BURST`` (default ``30``)
+- ``CODEX_RATE_LIMIT_DISABLED`` (default ``false``)
+
+The limiter is in-process and per-replica. Multi-replica fleets
+get effective limit ``N × rpm``; a distributed accounting backend
+is on the long-tail backlog.
+
+### Behavior-locking parity
+
+A new test pins the 1.0-era field set on ``/v1/extract`` and
+asserts no removed/renamed fields. Future contract changes that
+aren't additive trip this test loudly.
+
 ## 1.9.0-rc.1 — 2026-05-11
 
 Phase 1 of the unified extraction campaign — the three per-resource

@@ -29,8 +29,10 @@ When work spans layers, define a contract seam and keep logic in its owner servi
 
 Codex now runs as **three services** in production. They share the
 same content-addressed cache key format
-(`codex:{VERSION}:{kind}:{pdf_sha}:{args_sha}`) so a `VERSION` bump
-invalidates every tier atomically.
+(`codex:{VERSION}:{kind}:{tenant}:{pdf_sha}:{args_sha}`) so a
+`VERSION` bump invalidates every tier atomically. ``tenant`` is
+``"default"`` for single-tenant deployments; multi-tenant
+deployments route on the ``X-Codex-Tenant`` request header.
 
 ### 1. codex-pdf API (Railway, project `lintpdf.com`)
 

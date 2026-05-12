@@ -2,13 +2,17 @@
 
 Caches raw PDF bytes by ``sha256(pdf)`` so clients (loupe-pdf,
 lint-pdf) can avoid re-uploading the same PDF on every render call.
+Each blob is scoped by ``tenant`` so a hash uploaded by Tenant A
+isn't readable by Tenant B even if the hash leaks elsewhere.
+Defaults to ``"default"`` for single-tenant deployments.
 
 After ``/v1/extract`` runs, the source PDF is stashed here and its
 sha256 is returned to the client in the codex document. Subsequent
 render / sample / walk calls may pass ``pdf_sha256`` instead of a
-multipart ``pdf`` upload — the server looks up the bytes by hash
-and proceeds normally. If the hash has expired (TTL) the server
-returns ``412 Precondition Failed`` and the client re-uploads.
+multipart ``pdf`` upload — the server looks up the bytes by
+``(tenant, hash)`` and proceeds normally. If the hash has expired
+(TTL) the server returns ``412 Precondition Failed`` and the client
+re-uploads.
 
 Default TTL is 60 minutes — long enough for an interactive viewer
 session but short enough that idle blobs don't accumulate. Backed
@@ -28,6 +32,13 @@ DEFAULT_BLOB_TTL_SECONDS = 3600
 DEFAULT_BLOB_MAX_BYTES = 500 * 1024 * 1024  # 500 MB across all blobs in memory mode
 
 
+def _scoped(sha256: str, tenant: str) -> str:
+    """Internal key: tenant + sha256. Tenant collisions across the
+    same hash are impossible because each tenant gets its own slot.
+    """
+    return f"{tenant}:{sha256}"
+
+
 class MemoryBlobStore:
     """In-process blob store with size-bound LRU eviction.
 
@@ -43,20 +54,22 @@ class MemoryBlobStore:
         self._store: OrderedDict[str, bytes] = OrderedDict()
         self._total_bytes = 0
 
-    def put(self, sha256: str, pdf_bytes: bytes) -> None:
-        if sha256 in self._store:
-            self._total_bytes -= len(self._store[sha256])
-            self._store.move_to_end(sha256)
-        self._store[sha256] = pdf_bytes
+    def put(self, sha256: str, pdf_bytes: bytes, *, tenant: str = "default") -> None:
+        key = _scoped(sha256, tenant)
+        if key in self._store:
+            self._total_bytes -= len(self._store[key])
+            self._store.move_to_end(key)
+        self._store[key] = pdf_bytes
         self._total_bytes += len(pdf_bytes)
         while self._total_bytes > self._max_bytes and len(self._store) > 1:
             _, evicted = self._store.popitem(last=False)
             self._total_bytes -= len(evicted)
 
-    def get(self, sha256: str) -> bytes | None:
-        if sha256 in self._store:
-            self._store.move_to_end(sha256)
-            return self._store[sha256]
+    def get(self, sha256: str, *, tenant: str = "default") -> bytes | None:
+        key = _scoped(sha256, tenant)
+        if key in self._store:
+            self._store.move_to_end(key)
+            return self._store[key]
         return None
 
 
@@ -89,12 +102,17 @@ class RedisBlobStore:
 
         self._ttl = ttl_seconds
 
-    def put(self, sha256: str, pdf_bytes: bytes) -> None:
+    def put(self, sha256: str, pdf_bytes: bytes, *, tenant: str = "default") -> None:
         try:
-            self._client.set(PDF_BLOB_KEY_PREFIX + sha256, pdf_bytes, ex=self._ttl)
+            self._client.set(
+                PDF_BLOB_KEY_PREFIX + _scoped(sha256, tenant),
+                pdf_bytes,
+                ex=self._ttl,
+            )
         except Exception:
             logger.warning(
-                "RedisBlobStore.put failed for %s; blob not cached",
+                "RedisBlobStore.put failed for %s/%s; blob not cached",
+                tenant,
                 sha256[:16],
                 exc_info=True,
             )
@@ -106,25 +124,32 @@ class RedisBlobStore:
         # collapses repeated puts for the same sha into a single XADD.
         try:
             if self._client.set(
-                f"codex:speculate:dedupe:{sha256}", "blob_put", ex=60, nx=True
+                f"codex:speculate:dedupe:{tenant}:{sha256}",
+                "blob_put",
+                ex=60,
+                nx=True,
             ):
                 self._client.xadd(
                     "codex:speculate",
-                    {"sha": sha256, "source": "blob_put"},
+                    {"sha": sha256, "tenant": tenant, "source": "blob_put"},
                     maxlen=10000,
                     approximate=True,
                 )
         except Exception:
             logger.debug(
-                "speculate publish failed for %s on blob put", sha256[:16], exc_info=True
+                "speculate publish failed for %s/%s on blob put",
+                tenant,
+                sha256[:16],
+                exc_info=True,
             )
 
-    def get(self, sha256: str) -> bytes | None:
+    def get(self, sha256: str, *, tenant: str = "default") -> bytes | None:
         try:
-            return self._client.get(PDF_BLOB_KEY_PREFIX + sha256)
+            return self._client.get(PDF_BLOB_KEY_PREFIX + _scoped(sha256, tenant))
         except Exception:
             logger.warning(
-                "RedisBlobStore.get failed for %s; treating as miss",
+                "RedisBlobStore.get failed for %s/%s; treating as miss",
+                tenant,
                 sha256[:16],
                 exc_info=True,
             )

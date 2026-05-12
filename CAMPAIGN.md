@@ -42,10 +42,11 @@ Draft PRs only.
 - [x] Phase 0 — Contract freeze — PR #14 (merged `5c8158a`),
   rc.0 cut PR #16 (merged `5a4939f`)
 - [x] Phase 1 — Implementations behind stubs — PR #17
-  (merged `d0a1e4d`), rc.1 cut _pending_
+  (merged `d0a1e4d`), rc.1 cut PR #18 (merged `b98ca5b`)
 - [x] Phase 1.5 — Sync-vs-async conformance decision — _resolved
   inline; see Phase 1 log_
-- [ ] Phase 2 — Operational contract (errors, auth, rate limits)
+- [x] Phase 2 — Operational contract (errors, tenancy, rate
+  limits, parity) — PR _pending_
 - [ ] Phase 3 — Consumer rollout + observability
 - [ ] Phase 4 — Long-tail (versioning, eviction, SLOs)
 - [ ] Synthesis — Emit consumer + marketing prompts
@@ -230,32 +231,91 @@ the log for traceability.
   can flip when ready. Phase 1 is additive — the contract shape
   doesn't change.
 
+### Phase 2 — 2026-05-11 — PR _pending_
+
+**Shipped:**
+- **Tenancy.** ``cache_key`` now keys on
+  ``(VERSION, kind, tenant, pdf_hash, args_sha)``. ``_blob_store``
+  and ``renders_index`` both gained explicit ``tenant`` parameters.
+  Every endpoint that touches the cache or blob store derives the
+  tenant from the ``X-Codex-Tenant`` header via
+  ``normalise_tenant`` and threads it through. Default fallback is
+  ``"default"``. The 412 message on a hash miss is intentionally
+  identical for "wrong tenant" and "expired" so probing for a
+  hash's owner is uninformative.
+- **Error-shape catalogue.** New shared ``ErrorResponse`` envelope
+  ``{detail: str}``. Phase 1 endpoints declare
+  ``responses={400, 404, 429}`` in their FastAPI decorators with
+  the unified shape so OpenAPI surfaces the catalogue. Older
+  endpoints keep their existing ``HTTPException`` flow (same
+  envelope, no decorator change yet — Phase 4 cleanup).
+- **Rate limits.** New ``codex_pdf.api.rate_limit`` module: simple
+  in-process token bucket per ``(tenant, endpoint)``. Compute-and-
+  cache POSTs (`extract`, `extract_stream`, `render_page`,
+  `render_separations`, `render_heatmap`, `render_layer`,
+  `sample_color`, `sample_density`, `walk_content_stream`,
+  `conformance`) all consult the limiter and emit
+  ``429 Too Many Requests`` + ``Retry-After`` when the bucket is
+  empty. Env config: ``CODEX_RATE_LIMIT_RPM`` (default 120),
+  ``CODEX_RATE_LIMIT_BURST`` (default 30),
+  ``CODEX_RATE_LIMIT_DISABLED`` (off-switch).
+- **Behavior-locking parity test.** Snapshots the 1.0-era field
+  set on ``/v1/extract`` and asserts no removed/renamed fields at
+  document- or page-level. Future contract changes that aren't
+  additive trip this test loudly.
+
+**Deferred:**
+- Multi-replica rate limiting. The in-process limiter is per-
+  replica; effective limit on N replicas is N × rpm. Phase 4
+  (long-tail) will move to Redis-backed counters if/when we need
+  fleet-wide quotas.
+- Per-endpoint quota policy. Every limited endpoint shares the
+  same bucket sizes. Per-endpoint overrides (e.g. cheaper limit on
+  expensive `extract_stream`) can layer additively.
+- Machine-readable error ``code`` field. Current ``ErrorResponse``
+  is ``{detail: str}``; adding ``code`` later is additive (no
+  field rename / removal).
+- Retrofit of older endpoints' ``responses=`` decorators. The
+  shape they emit is already ``ErrorResponse``-compatible (FastAPI
+  ``HTTPException`` → ``{"detail": "..."}``), but their OpenAPI
+  description still lists generic 500s. Phase 4 cleanup.
+
+**Learned:**
+- Test isolation matters. The fastapi ``TestClient`` shares
+  module-level state (``_blob_store``, ``_cache``,
+  ``_rate_limiter``) across tests; we can't make assertions about
+  the default tenant from a single test because prior tests have
+  already populated it. Future cross-tenant tests should use
+  unique tenant labels (e.g. ``"tenant-a"`` / ``"tenant-b"``)
+  rather than relying on the default.
+- Cache-key shape change is a deliberate break, OK because we're
+  pre-release. All ``codex:{VERSION}:{kind}:{pdf_sha}:{args_sha}``
+  keys are now ``codex:{VERSION}:{kind}:{tenant}:{pdf_sha}:{args_sha}``.
+  Operators upgrading from rc.1 → rc.2/final will see cold caches
+  on first request; that's the price of multi-tenant correctness.
+
+**Decisions owed:** _none_.
+
 ## Synthesis Output
 
 Not yet produced. Populated by the `synthesize` invocation once
-implementations stabilise (post Phase 1, latency permitting).
+implementations stabilise. Phase 2 is now the right moment — rc.2
+(or 1.9.0 final) makes the operational contract concrete for
+consumers to wire against.
 
 ## Next Phase — Plan (for `next` invocation)
 
-**Phase 1 — Implementations behind stubs.** Scope:
+**Phase 3 — Consumer rollout + observability.**
 
-- Wire the text-region detector to the cache key
-  `(pdf_hash, page_index, dpi)`; have `/v1/extract` populate
-  `CodexPage.detected_text_regions` when computed and serve the
-  `GET /v1/documents/{pdf_hash}/text-regions` endpoint from cache.
-- Implement the conformance engine for each enum profile
-  (`pdfx4`, `pdfx1a`, `pdfx3`, `pdfa1b`, `pdfa2b`, `pdfa3b`,
-  `pdfua1`); cache by `(pdf_hash, profile)`; serve from
-  `POST /v1/documents/{document_id}/conformance/{profile}`.
-- Implement `GET /v1/documents/{pdf_hash}/renders` by indexing
-  what's already in the render cache for that PDF.
-- Emit real per-stage timings on every response — fill the
-  `extract` / `render` / `text_regions` / `conformance` slots in
-  `stage_durations_ms` (the envelope + header are already wired).
-- Instrument latency for conformance compute per profile; record
-  p50/p95 in the Phase 1 log entry. This number drives Phase 1.5.
+- Generate + publish typed clients (Python at minimum; TS is
+  already on the registry — bump for the Phase 2 surface).
+- Cache-key stability test across restarts (proves keys survive
+  process boundaries).
+- Structured logs + metrics: cache hit rate per endpoint,
+  p50/p95 per stage.
+- Consumer-facing "how to integrate" doc in ``docs/``.
 
-Open Questions Q1–Q3 do not strictly block Phase 1 from starting,
-but they should be resolved before merging Phase 1 so the rollout
-order is unambiguous. Surface them again at the top of the Phase 1
-PR description.
+Phase 3 has no blockers — Phase 2's operational contract is
+self-contained and consumer-agnostic. Start with the typed-client
+bump so consumers (lint-pdf, future loupe-pdf / compile-pdf) see
+the tenant + rate-limit surface in their generated bindings.
