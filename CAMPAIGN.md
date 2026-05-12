@@ -49,7 +49,8 @@ Draft PRs only.
   limits, parity) — PR #19 (merged `d79cbad`), rc.2 cut _pending_
 - [x] Phase 3 — Consumer rollout + observability — PR #21
   (merged `a19a364`), rc.3 cut _pending_
-- [x] Phase 4 — Long-tail (versioning, eviction, SLOs) — PR _pending_
+- [x] Phase 4 — Long-tail (versioning, eviction, SLOs) — PR #23
+  (merged `3a774b9`), `1.9.0` final cut _pending_
 - [ ] Synthesis — Emit consumer + marketing prompts
 
 ## Phase Log
@@ -376,7 +377,13 @@ clients + observability surfaces.
 
 **Decisions owed:** _none_.
 
-### Phase 4 — 2026-05-12 — PR _pending_
+### Phase 4 — 2026-05-12 — PR #23 — merged
+
+**`1.9.0` final cut:** Python `1.9.0`, TS `1.9.0` (lockstep).
+Promotes the rc series to the default channels — PyPI default
+resolution; npm `latest` dist-tag. Contract surface identical to
+`1.9.0-rc.3`.
+
 
 **Shipped:**
 - ``ConformanceProfile`` enum versioning policy formalised in
