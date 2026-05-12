@@ -1,5 +1,47 @@
 """Package version.
 
+1.11.0 (minor): AI Signal Campaign — Phase 1 implementation lands.
+The six extractors frozen by 1.10.0's contract are now wired:
+
+- :mod:`codex_pdf.ai.language` — page dominant-language detection
+  (Claude Haiku, text-only)
+- :mod:`codex_pdf.ai.logos` — brand / logo detection (Claude Sonnet
+  vision)
+- :mod:`codex_pdf.ai.symbols` — regulatory / packaging / safety
+  symbol detection (Claude Sonnet vision)
+- :mod:`codex_pdf.ai.barcodes` — pyzbar + pylibdmtx pure-CPU lane
+  (no Claude calls)
+- :mod:`codex_pdf.ai.classification` — document-level classification
+  (Claude Haiku, text-only)
+- :mod:`codex_pdf.ai.spell` — unknown-word candidates (Claude Haiku,
+  text-only)
+
+The :class:`~codex_pdf.ai.budget.AiBudget` enforces a per-request
+hard cap (env ``CODEX_AI_COST_CAP_USD_PER_REQUEST``, default
+``$0.10``); the next call's projection is checked BEFORE the call
+goes out so a single huge PDF can't blow the budget. ``cap`` hit →
+``CodexWarning(code="ai_budget_exceeded", scope="signals.<kind>")``
+and remaining signals stay empty.
+
+The warning catalogue evolves slightly from 1.10.0:
+
+- ``ai_signals_pending_impl`` was Phase 0 only and no longer emits.
+- ``ai_missing_credentials`` is new — operator opted in but
+  ``anthropic`` SDK isn't importable or ``ANTHROPIC_API_KEY`` is
+  unset. Signal fields stay empty.
+- ``ai_tier`` (advisory) now lands on every successful AI run; its
+  message carries the tier label (``cpu+claude`` for Tier 1,
+  ``gpu`` for Tier 2 when ``CODEX_AI_GPU_URL`` is set) plus the
+  realised dollar spend.
+
+The ``GET /v1/documents/{pdf_hash}/signals/{kind}`` endpoint
+returns real data now — Phase 0's 501 stub is gone. Page-scoped
+kinds accept ``?page_index=N`` (default 0). The endpoint hits the
+per-kind cache first; on miss it re-runs only the requested
+extractor.
+
+Schema unchanged at 1.3.0 — the contract was finalised in 1.10.0.
+
 1.4.0 (minor): pulls spot-color authority and geometry primitives
 into codex. New :mod:`codex_pdf.color` package owns the canonical
 Pantone reference (formerly forked between lint-pdf and loupe-pdf),
@@ -38,5 +80,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.10.0"
+VERSION = "1.11.0"
 __version__ = VERSION

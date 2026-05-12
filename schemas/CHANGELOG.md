@@ -1,5 +1,50 @@
 # Schema Changelog
 
+## 1.11.0 — 2026-05-12
+
+Codex AI Signal Campaign — Phase 1 (implementation lands). The six
+extractors frozen by 1.10.0's contract are now wired and produce
+real data. **Schema unchanged at 1.3.0** — the contract was
+finalised in 1.10.0; 1.11.0 ships the runtime behind it.
+
+### Behaviour change (additive)
+
+- `GET /v1/documents/{pdf_hash}/signals/{kind}` now returns real
+  data instead of `501 Not Implemented`. Pass `?page_index=N` for
+  page-scoped kinds (default `0`); `classification` is
+  document-scoped and ignores the parameter. The 404 contract for
+  uncached PDFs is unchanged.
+- `POST /v1/extract` populates the five page-scoped signal fields
+  and `document_classification` when `CODEX_AI_ENABLED=true` and
+  the caller has not opted out via `X-Codex-Skip-AI: true`.
+
+### Warning catalogue
+
+- `ai_signals_pending_impl` is removed — Phase 0 only.
+- `ai_missing_credentials` is new — operator opted in but the
+  `anthropic` SDK isn't importable or `ANTHROPIC_API_KEY` is unset.
+- `ai_tier` now emits on every successful AI run; the `message`
+  carries the tier label (`cpu+claude` for Tier 1, `gpu` for
+  Tier 2) plus the realised dollar spend.
+- `ai_budget_exceeded` is unchanged but now actually emits — the
+  per-request cost cap (`CODEX_AI_COST_CAP_USD_PER_REQUEST`,
+  default `$0.10`) is enforced by `codex_pdf.ai.budget.AiBudget`.
+
+### New / changed operator switches
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_AI_COST_CAP_USD_PER_REQUEST` | `0.10` | Per-request hard cap on projected Claude spend. The next call's projection is checked BEFORE the call goes out. |
+| `ANTHROPIC_API_KEY` | unset | Required when `CODEX_AI_ENABLED=true`. Unset emits `ai_missing_credentials`. |
+| `CODEX_AI_GPU_URL` | unset | Optional Tier 2 GPU endpoint. Phase 1.5 will wire the lane; Phase 1 reads but doesn't dispatch. |
+
+### Cache + tier
+
+- Per-kind cache namespace is `codex:{VERSION}:signal:{tenant}:{pdf_hash}:{kind}[:p{idx}]`.
+  Idempotent: same key → same JSON.
+- Default backend in Phase 1 is **Tier 1 (CPU + Claude)** as
+  designed; `CODEX_AI_GPU_URL` stays unset on the public demo.
+
 ## 1.10.0 — 2026-05-12
 
 Codex AI Signal Campaign — Phase 0 (contract freeze). Additive

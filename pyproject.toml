@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-pdf"
-version = "1.10.0"
+version = "1.11.0"
 description = "Authoritative, versioned PDF facts contract for Think Neverland tools."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,23 @@ geom = [
 ]
 retain = [
     "boto3>=1.34",
+]
+ai = [
+    # Anthropic SDK for Tier 1 (CPU + Claude) AI signal extractors.
+    # Optional: a deployment without the [ai] extra installed emits
+    # ``ai_missing_credentials`` instead of populating signal fields.
+    "anthropic>=0.40",
+    # Pillow for raster decode in the vision-extractor lane (logos,
+    # symbols, barcodes). Already a transitive dep via PyMuPDF in many
+    # environments; listed explicitly so [ai] is self-contained.
+    "Pillow>=10.0",
+]
+ai-barcodes = [
+    # Pure-CPU barcode decoders. Native libraries (zbar, libdmtx) must
+    # be present at runtime — see codex-pdf-marketing's Dockerfile.
+    "pyzbar>=0.1.9",
+    "pylibdmtx>=0.1.10",
+    "Pillow>=10.0",
 ]
 
 [project.scripts]

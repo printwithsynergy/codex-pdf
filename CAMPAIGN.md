@@ -774,10 +774,10 @@ Carried over from the unified extraction campaign:
 
 ## Phase Plan
 
-- [x] Phase 0 — Contract freeze (this PR)
-- [ ] Phase 1 — Implementations (Claude-backed extractors)
-- [ ] Phase 1.5 — Cost + latency check; sync-vs-async decision per
-      signal kind
+- [x] Phase 0 — Contract freeze (1.10.0, merged)
+- [x] Phase 1 — Implementations (Claude-backed extractors) — 1.11.0
+- [ ] Phase 1.5 — codex-vision-sidecar (CPU ONNX HTTP service for
+      CLIP / NudeNet / perceptual hashing without GPU spend)
 - [ ] Phase 2 — Operational contract (tenancy isolation for AI
       cache, per-tenant AI entitlements, rate-limit dimension for
       AI compute)
@@ -786,6 +786,78 @@ Carried over from the unified extraction campaign:
       compile gates producers on detected dielines)
 - [ ] Phase 4 — Long-tail (model versioning policy, prompt-version
       header, cost-cap evictions, NSFW / specialised lanes)
+
+## Phase 1 — 2026-05-12 — 1.11.0 — Implementations shipped
+
+**Shipped:**
+
+- New package `codex_pdf.ai/` with six extractors:
+  - `language.py` — Claude Haiku, page text → BCP-47 + confidence.
+  - `logos.py` — Claude Sonnet vision, page raster → bbox + brand
+    identity + confidence (in PDF user-space points).
+  - `symbols.py` — Claude Sonnet vision, page raster → bbox +
+    catalogue kind (GHS / recycling / FDA / CE / ™ / © …).
+  - `barcodes.py` — pyzbar + pylibdmtx pure-CPU; no Claude call.
+  - `classification.py` — Claude Haiku, document text →
+    `dict[str, float]` probability map.
+  - `spell.py` — Claude Haiku, page text → unknown-word candidates.
+- New shared infrastructure:
+  - `budget.py` — `AiBudget` with pre-call cost projection;
+    `CODEX_AI_COST_CAP_USD_PER_REQUEST` (default `$0.10`) honoured
+    uniformly. `AiBudgetExceededError` is caught by the dispatcher
+    and surfaced as a `CodexWarning`, never a 500.
+  - `context.py` — `AiContext` snapshots the gate decision
+    (`enabled` / `disabled` / `skipped` / `missing_credentials`)
+    once per request so extractors never re-read env vars.
+  - `claude.py` — thin Anthropic SDK wrapper. Lazy client (one TCP
+    pool per process). Prompt-cached system blocks
+    (`cache_control: ephemeral`) so repeat extractions hit
+    Anthropic's 1-hour cache and pay 10× less on cached input
+    tokens.
+  - `cache.py` — per-kind cache helpers. Same Redis / in-process
+    LRU backend as the rest of codex; per-kind keys + 1-week TTL.
+  - `dispatcher.py` — single entry point used by `_extract_impl`
+    (whole-document) and `signal_endpoint` (one kind, with
+    cache lookup before recompute).
+- API wiring:
+  - `_extract_impl` runs the AI lane in the executor pool when
+    `AiContext.runnable`; signal fields land in the response
+    payload.
+  - `signal_endpoint` no longer returns 501. Validates the hash +
+    kind, hits the cache, re-runs the extractor on miss.
+  - `_annotate_ai_status` now emits one of `ai_disabled` /
+    `ai_skipped` / `ai_missing_credentials` / `ai_tier`. The
+    Phase 0 `ai_signals_pending_impl` code is gone.
+- New optional extras:
+  - `pip install "codex-pdf[ai]"` — adds `anthropic` + Pillow.
+  - `pip install "codex-pdf[ai-barcodes]"` — adds pyzbar +
+    pylibdmtx (requires native zbar / libdmtx at runtime).
+- New tests (`tests/test_ai_phase1.py`) — 13 tests cover budget,
+  cost estimation, every extractor's parse path, JSON unwrap
+  helpers (markdown fences, trailing prose, garbage),
+  graceful-degradation paths (missing decoder, empty input).
+  Existing `test_api.py` tests rewritten: `ai_signals_pending_impl`
+  removed; `ai_missing_credentials` test added; 501-stub test
+  replaced with 404-when-not-cached.
+
+**Decisions made:**
+
+- Tier 1 (CPU + Claude) lands as the default Phase 1 backend. The
+  GPU lane is wired in `AiContext.gpu_url` but Phase 1 does not
+  dispatch to it; that's Phase 1.5's responsibility.
+- Cost cap is enforced via pre-call projection, not post-call
+  accounting. Better to refuse a borderline call than blow the
+  budget.
+- Each extractor degrades to its kind-specific empty value
+  (`None` for language, `{}` for classification, `[]` for the
+  rest) when context is not runnable — consumers always read a
+  well-typed surface.
+
+**Deferred to Phase 1.5:**
+
+- codex-vision-sidecar (CPU ONNX service: CLIP, NudeNet,
+  perceptual hash) for visual-similarity extractors that would
+  otherwise need GPU.
 
 ## Phase 0 — Contract freeze (this PR)
 

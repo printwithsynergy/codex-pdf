@@ -139,14 +139,14 @@ not run for this request" state.
 | --- | --- | --- |
 | `ai_disabled` | `signals.ai` | Operator gate is off. Affects every request. |
 | `ai_skipped` | `signals.ai` | Caller opted out for this request. |
-| `ai_signals_pending_impl` | `signals.ai` | AI is enabled but the Phase 1 implementation isn't deployed yet. Phase 0 advisory only. |
-| `ai_tier` | `signals.ai` | Informational. Emitted on every extract when AI ran; the warning's `message` carries `"cpu+claude"` (Tier 1) or `"gpu"` (Tier 2) so consumers know which backend produced the signals. |
-| `ai_budget_exceeded` | `signals.ai` | The per-request cost cap (`CODEX_AI_COST_CAP_USD_PER_REQUEST`) was hit mid-extract; signal fields are empty even though the operator + caller asked for AI. Combines additively with `ai_tier`. |
+| `ai_missing_credentials` | `signals.ai` | Operator opted in but the `anthropic` SDK isn't importable or `ANTHROPIC_API_KEY` is unset. Install `codex-pdf[ai]` and set the key to populate signal fields. |
+| `ai_tier` | `signals.ai` | Informational. Emitted on every extract when AI ran; the warning's `message` carries `"cpu+claude"` (Tier 1) or `"gpu"` (Tier 2) plus the realised dollar spend, so consumers know which backend produced the signals and what it cost. |
+| `ai_budget_exceeded` | `signals.<kind>` | The per-request cost cap (`CODEX_AI_COST_CAP_USD_PER_REQUEST`) was hit mid-extract; signal fields for the affected kinds are empty. Combines additively with `ai_tier`. |
 
-Exactly one of `ai_disabled` / `ai_skipped` / `ai_signals_pending_impl` / `ai_tier`
-always lands on every `/v1/extract` response. Consumers MUST NOT branch on the
-absence of these warnings — branch on the presence of the
-specific code instead.
+Exactly one of `ai_disabled` / `ai_skipped` / `ai_missing_credentials`
+/ `ai_tier` always lands on every `/v1/extract` response. Consumers
+MUST NOT branch on the absence of these warnings — branch on the
+presence of the specific code instead.
 
 ### Cache key contract
 
