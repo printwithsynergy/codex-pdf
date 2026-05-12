@@ -38,5 +38,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.9.0rc2"
+VERSION = "1.9.0rc3"
 __version__ = VERSION

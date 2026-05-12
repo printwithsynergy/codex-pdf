@@ -47,7 +47,8 @@ Draft PRs only.
   inline; see Phase 1 log_
 - [x] Phase 2 — Operational contract (errors, tenancy, rate
   limits, parity) — PR #19 (merged `d79cbad`), rc.2 cut _pending_
-- [x] Phase 3 — Consumer rollout + observability — PR _pending_
+- [x] Phase 3 — Consumer rollout + observability — PR #21
+  (merged `a19a364`), rc.3 cut _pending_
 - [ ] Phase 4 — Long-tail (versioning, eviction, SLOs)
 - [ ] Synthesis — Emit consumer + marketing prompts
 
@@ -309,7 +310,12 @@ implementations stabilise. Phase 2 is now the right moment — rc.2
 (or 1.9.0 final) makes the operational contract concrete for
 consumers to wire against.
 
-### Phase 3 — 2026-05-12 — PR _pending_
+### Phase 3 — 2026-05-12 — PR #21 — merged
+
+**rc.3 cut:** Python `1.9.0rc3`, TS `1.9.0-rc.3` (lockstep).
+No contract change vs rc.2; this release ships the bundled
+clients + observability surfaces.
+
 
 **Shipped:**
 - **Python client tenant + Phase 1 surface.** ``HttpClient``
