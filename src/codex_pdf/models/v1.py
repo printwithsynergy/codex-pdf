@@ -302,6 +302,101 @@ class CodexConformanceVerdict(BaseModel):
     clauses: list[CodexClauseFailure] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# AI signal extraction — Codex AI Signal Campaign Phase 0 (1.3.0).
+#
+# These are *detection signals*, not policy verdicts. Codex emits the
+# raw facts (what language is this text? where is this logo? what
+# barcode is encoded?); downstream consumers (lint, loupe, compile)
+# apply tenant policy on top.
+#
+# All fields default to empty. Codex extraction populates them when
+# (a) the operator has enabled AI via ``CODEX_AI_ENABLED=true`` and
+# (b) the caller has not opted out via ``X-Codex-Skip-AI: true``.
+#
+# When AI is requested but unavailable, codex emits a ``CodexWarning``
+# with ``code="ai_disabled"`` (operator-side) or ``code="ai_skipped"``
+# (caller-side opt-out) so consumers can render an honest "AI signals
+# not available" state instead of pretending the data was checked.
+# ---------------------------------------------------------------------------
+
+
+class CodexDetectedLanguage(BaseModel):
+    """Detected dominant language on a page.
+
+    Cache key: ``(pdf_hash, page_index, "language")``. ``code`` is a
+    BCP-47 tag (``en``, ``en-US``, ``fr``, ``zh-Hans``).
+    ``confidence`` is the detector's posterior probability.
+    ``source`` records which detector emitted the signal — extractors
+    are free to add new labels; consumers must treat unknown values
+    as opaque.
+    """
+
+    code: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    source: str = "unknown"
+
+
+class CodexDetectedLogo(BaseModel):
+    """Detected logo / brand mark on a page.
+
+    Cache key: ``(pdf_hash, page_index, "logos")``. ``identity`` is
+    the canonical brand name when recognised (``"FedEx"``, ``"USDA
+    Organic"``) or ``None`` for unknown logos that still have a
+    bbox. ``source`` records the detector path.
+    """
+
+    bbox: CodexBBox
+    identity: str | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    source: str = "unknown"
+
+
+class CodexDetectedSymbol(BaseModel):
+    """Detected regulatory / safety / packaging symbol.
+
+    Cache key: ``(pdf_hash, page_index, "symbols")``. ``kind`` is a
+    stable identifier like ``"ghs_flammable"``, ``"recycle_pet"``,
+    ``"fda_drug_facts"``, ``"ce_marking"``. Consumers must treat
+    unknown kinds as opaque (the catalogue grows additively).
+    """
+
+    bbox: CodexBBox
+    kind: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    source: str = "unknown"
+
+
+class CodexDetectedBarcode(BaseModel):
+    """One decoded barcode on a page.
+
+    Cache key: ``(pdf_hash, page_index, "barcodes")``. ``format`` is
+    one of ``"ean13"``, ``"upca"``, ``"code128"``, ``"qr"``,
+    ``"datamatrix"``, ``"pdf417"``, ``"aztec"``, …; consumers treat
+    unknown formats as opaque. ``value`` is the decoded payload.
+    """
+
+    bbox: CodexBBox
+    format: str
+    value: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    source: str = "unknown"
+
+
+# Signal kind literal — used as the path component on the per-resource
+# signals endpoint and as a key in any future signal aggregation. Forward
+# compatible: a future codex release may add ``"images"``, ``"fonts"``,
+# etc.; consumers must treat unknown values as opaque.
+SignalKind = Literal[
+    "language",
+    "logos",
+    "symbols",
+    "barcodes",
+    "spell",
+    "classification",
+]
+
+
 class CodexIssue(BaseModel):
     issue_id: str
     inspection_id: str | None = None
@@ -347,6 +442,17 @@ class CodexPage(BaseModel):
     # ``GET /v1/documents/{pdf_hash}/text-regions?page_index=N&dpi=N``.
     # Cache key: ``(pdf_hash, page_index, dpi)``.
     detected_text_regions: list[CodexDetectedTextRegion] = Field(default_factory=list)
+    # AI signals (Codex AI Signal Campaign — Phase 0, 1.3.0).
+    # Populated only when both ``CODEX_AI_ENABLED=true`` (operator) and
+    # ``X-Codex-Skip-AI: false`` (caller); empty + ``CodexWarning`` in
+    # ``extraction_warnings`` otherwise. See docs/policies.md.
+    detected_language: CodexDetectedLanguage | None = None
+    detected_logos: list[CodexDetectedLogo] = Field(default_factory=list)
+    detected_symbols: list[CodexDetectedSymbol] = Field(default_factory=list)
+    detected_barcodes: list[CodexDetectedBarcode] = Field(default_factory=list)
+    # Pure unknown-word list (no dictionary policy). Lint applies tenant
+    # spell rules on top; codex just emits the raw candidates.
+    spell_candidates: list[str] = Field(default_factory=list)
 
 
 class CodexSummaryCountMetrics(BaseModel):
@@ -470,7 +576,7 @@ class CodexDocumentSummary(BaseModel):
 
 
 class CodexDocument(BaseModel):
-    schema_version: str = "1.2.0"
+    schema_version: str = "1.3.0"
     codex_version: str
     document_id: str
     source: CodexSourceRef
@@ -510,3 +616,12 @@ class CodexDocument(BaseModel):
     # ``text_regions``, ``conformance``. Adding new ones is
     # non-breaking — consumers treat unknown keys as opaque.
     stage_durations_ms: dict[str, int] = Field(default_factory=dict)
+    # Document classification probabilities (Codex AI Signal Campaign).
+    # Keys are stable category strings (``"prescription_drug"``,
+    # ``"otc_drug"``, ``"food_packaging"``, ``"folding_carton"``,
+    # ``"sign"``, ``"proof"``, …); values are confidence probabilities
+    # ``[0.0, 1.0]``. Empty when AI is disabled / skipped — check
+    # ``extraction_warnings`` for ``code="ai_disabled"`` or
+    # ``code="ai_skipped"`` to disambiguate. Cache key:
+    # ``(pdf_hash, "classification")``.
+    document_classification: dict[str, float] = Field(default_factory=dict)

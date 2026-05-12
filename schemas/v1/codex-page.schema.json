@@ -35,6 +35,35 @@
       "type": "array",
       "items": { "$ref": "codex-detected-text-region.schema.json" },
       "description": "Text regions detected during extraction (cache key: pdf_hash, page_index, dpi)."
+    },
+    "detected_language": {
+      "anyOf": [{ "$ref": "codex-detected-language.schema.json" }, { "type": "null" }],
+      "default": null,
+      "description": "AI-detected dominant language on the page. Empty when AI is disabled / skipped — check extraction_warnings for ai_disabled / ai_skipped to disambiguate. Cache key: (pdf_hash, page_index, \"language\")."
+    },
+    "detected_logos": {
+      "type": "array",
+      "items": { "$ref": "codex-detected-logo.schema.json" },
+      "default": [],
+      "description": "AI-detected logos / brand marks. Cache key: (pdf_hash, page_index, \"logos\")."
+    },
+    "detected_symbols": {
+      "type": "array",
+      "items": { "$ref": "codex-detected-symbol.schema.json" },
+      "default": [],
+      "description": "AI-detected regulatory / safety / packaging symbols. Cache key: (pdf_hash, page_index, \"symbols\")."
+    },
+    "detected_barcodes": {
+      "type": "array",
+      "items": { "$ref": "codex-detected-barcode.schema.json" },
+      "default": [],
+      "description": "Decoded barcodes (pyzbar / pylibdmtx). Cache key: (pdf_hash, page_index, \"barcodes\")."
+    },
+    "spell_candidates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Unknown-word list from the spell-candidate pass. No tenant policy applied — consumers (lint) interpret. Cache key: (pdf_hash, page_index, \"spell\")."
     }
   },
   "additionalProperties": false

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-detected-logo.schema.json",
+  "title": "CodexDetectedLogo",
+  "description": "Detected logo / brand mark on a page. Cache key: (pdf_hash, page_index, \"logos\"). identity is the canonical brand name when recognised, null for unknown logos that still have a bbox.",
+  "type": "object",
+  "required": ["bbox"],
+  "properties": {
+    "bbox": { "$ref": "codex-box.schema.json" },
+    "identity": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null },
+    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 1.0 },
+    "source": { "type": "string", "default": "unknown" }
+  },
+  "additionalProperties": false
+}

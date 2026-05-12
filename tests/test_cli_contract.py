@@ -8,7 +8,7 @@ def test_contract_manifest_points_to_published_schema() -> None:
     manifest = _contract_manifest()
     schema_path = Path(manifest["schema_path"])
     assert schema_path.exists()
-    assert manifest["schema_version"] == "1.2.0"
+    assert manifest["schema_version"] == "1.3.0"
     assert manifest["contract_name"] == "codex-document"
 
 

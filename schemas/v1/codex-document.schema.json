@@ -281,6 +281,134 @@
       "title": "CodexConformanceVerdict",
       "type": "object"
     },
+    "CodexDetectedBarcode": {
+      "description": "One decoded barcode on a page.\n\nCache key: ``(pdf_hash, page_index, \"barcodes\")``. ``format`` is\none of ``\"ean13\"``, ``\"upca\"``, ``\"code128\"``, ``\"qr\"``,\n``\"datamatrix\"``, ``\"pdf417\"``, ``\"aztec\"``, \u2026; consumers treat\nunknown formats as opaque. ``value`` is the decoded payload.",
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/CodexBBox"
+        },
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "source": {
+          "default": "unknown",
+          "title": "Source",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bbox",
+        "format",
+        "value"
+      ],
+      "title": "CodexDetectedBarcode",
+      "type": "object"
+    },
+    "CodexDetectedLanguage": {
+      "description": "Detected dominant language on a page.\n\nCache key: ``(pdf_hash, page_index, \"language\")``. ``code`` is a\nBCP-47 tag (``en``, ``en-US``, ``fr``, ``zh-Hans``).\n``confidence`` is the detector's posterior probability.\n``source`` records which detector emitted the signal \u2014 extractors\nare free to add new labels; consumers must treat unknown values\nas opaque.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "source": {
+          "default": "unknown",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "CodexDetectedLanguage",
+      "type": "object"
+    },
+    "CodexDetectedLogo": {
+      "description": "Detected logo / brand mark on a page.\n\nCache key: ``(pdf_hash, page_index, \"logos\")``. ``identity`` is\nthe canonical brand name when recognised (``\"FedEx\"``, ``\"USDA\nOrganic\"``) or ``None`` for unknown logos that still have a\nbbox. ``source`` records the detector path.",
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/CodexBBox"
+        },
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity"
+        },
+        "source": {
+          "default": "unknown",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bbox"
+      ],
+      "title": "CodexDetectedLogo",
+      "type": "object"
+    },
+    "CodexDetectedSymbol": {
+      "description": "Detected regulatory / safety / packaging symbol.\n\nCache key: ``(pdf_hash, page_index, \"symbols\")``. ``kind`` is a\nstable identifier like ``\"ghs_flammable\"``, ``\"recycle_pet\"``,\n``\"fda_drug_facts\"``, ``\"ce_marking\"``. Consumers must treat\nunknown kinds as opaque (the catalogue grows additively).",
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/CodexBBox"
+        },
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "default": "unknown",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bbox",
+        "kind"
+      ],
+      "title": "CodexDetectedSymbol",
+      "type": "object"
+    },
     "CodexDetectedTextRegion": {
       "description": "A text region detected on a page during extraction.\n\nGeometry is expressed in PDF user-space points so consumers can\ncomposite regions with other codex outputs (boxes, inventory) without\na per-call DPI conversion. ``polygon`` is optional: it carries a\ntighter outline when the detector produced one (e.g. layout\nanalysis), while ``bbox`` is the always-present axis-aligned\nbounding box. ``source`` records which detector path emitted the\nregion \u2014 extractors are free to add new source labels; consumers\nmust treat unknown values as opaque.\n\nCache key: ``(pdf_hash, page_index, dpi)`` \u2014 see\n``GET /v1/documents/{pdf_hash}/text-regions``.",
       "properties": {
@@ -1044,6 +1172,38 @@
         "boxes": {
           "$ref": "#/$defs/CodexPageBoxes"
         },
+        "detected_barcodes": {
+          "items": {
+            "$ref": "#/$defs/CodexDetectedBarcode"
+          },
+          "title": "Detected Barcodes",
+          "type": "array"
+        },
+        "detected_language": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexDetectedLanguage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detected_logos": {
+          "items": {
+            "$ref": "#/$defs/CodexDetectedLogo"
+          },
+          "title": "Detected Logos",
+          "type": "array"
+        },
+        "detected_symbols": {
+          "items": {
+            "$ref": "#/$defs/CodexDetectedSymbol"
+          },
+          "title": "Detected Symbols",
+          "type": "array"
+        },
         "detected_text_regions": {
           "items": {
             "$ref": "#/$defs/CodexDetectedTextRegion"
@@ -1069,6 +1229,13 @@
           "default": 0,
           "title": "Rotation",
           "type": "integer"
+        },
+        "spell_candidates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Spell Candidates",
+          "type": "array"
         },
         "transparency_tree": {
           "$ref": "#/$defs/CodexTransparencyTree"
@@ -2455,6 +2622,13 @@
       "title": "Conformance Verdicts",
       "type": "object"
     },
+    "document_classification": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Document Classification",
+      "type": "object"
+    },
     "document_id": {
       "title": "Document Id",
       "type": "string"
@@ -2549,7 +2723,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.2.0",
+      "default": "1.3.0",
       "title": "Schema Version",
       "type": "string"
     },

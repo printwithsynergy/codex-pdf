@@ -112,3 +112,58 @@ correlate without re-deriving.
 
 See [`slos.md`](./slos.md) for the published latency / availability
 targets and recommended alert thresholds.
+
+## AI signals (1.3.0)
+
+Detection signals derived from AI models (vision, language, document
+classification) live in codex's data layer. They're opt-in for both
+the operator and the caller — and codex always emits a structured
+warning when the signals come back empty so consumers know why.
+
+### Operator switch
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_AI_ENABLED` | `false` | When `true`, codex's AI extractors (language, logos, symbols, classification, spell, OCR) run on every extract. When `false`, all AI signal fields stay empty and codex emits `CodexWarning(code="ai_disabled", scope="signals.ai")` in `extraction_warnings`. |
+
+### Caller switch
+
+`X-Codex-Skip-AI: true` request header opts the caller out of AI
+extraction even when the operator has it on. Same warning shape
+(`code="ai_skipped"`) so consumers can render an honest "AI signals
+not run for this request" state.
+
+### Warning catalogue
+
+| `code` | `scope` | Meaning |
+| --- | --- | --- |
+| `ai_disabled` | `signals.ai` | Operator gate is off. Affects every request. |
+| `ai_skipped` | `signals.ai` | Caller opted out for this request. |
+| `ai_signals_pending_impl` | `signals.ai` | AI is enabled but the Phase 1 implementation isn't deployed yet. Phase 0 advisory only. |
+
+Exactly one of these always lands on every `/v1/extract` response
+when AI is requested or pending. Consumers MUST NOT branch on the
+absence of these warnings — branch on the presence of the
+specific code instead.
+
+### Cache key contract
+
+Per-resource endpoint: `GET /v1/documents/{pdf_hash}/signals/{kind}`.
+
+| kind | cache key |
+| --- | --- |
+| `language` | `(tenant, pdf_hash, page_index, "language")` |
+| `logos` | `(tenant, pdf_hash, page_index, "logos")` |
+| `symbols` | `(tenant, pdf_hash, page_index, "symbols")` |
+| `barcodes` | `(tenant, pdf_hash, page_index, "barcodes")` |
+| `spell` | `(tenant, pdf_hash, page_index, "spell")` |
+| `classification` | `(tenant, pdf_hash, "classification")` |
+
+Stable across versions. Idempotent: same key → same bytes.
+
+### Forward compatibility
+
+The `SignalKind` enum is intentionally extensible. Future codex
+releases may add `images`, `fonts`, `dieline_detected`, etc.
+Consumers reading signals MUST treat unknown `kind` strings as
+opaque so older clients don't break against newer servers.
