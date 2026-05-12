@@ -170,9 +170,19 @@ Clause coverage is the minimum-viable set in the rc.x series. Full
 ISO coverage lands in later phases; the framework is registry-
 driven, so new clauses are additive only.
 
-## AI signals (1.11.0)
+## AI signals (1.11.0 – 1.15.0)
 
-Codex 1.11.0 implements the AI Signal contract frozen in 1.10.0.
+Codex 1.11.0 lit up the AI Signal contract frozen in 1.10.0;
+subsequent 1.x releases iterated on it:
+
+| Release | Change |
+| --- | --- |
+| **1.11.0** | Six extractors wired behind ``CODEX_AI_ENABLED``. |
+| **1.12.0** | codex-vision-sidecar (`CODEX_VISION_URL`) — optional CPU CV lane. |
+| **1.13.0** | `ai_model_versions` on `/v1/contract` + `codex_ai_signal_calls_total` Prometheus metric. |
+| **1.14.0** | Per-tenant entitlements (`CODEX_AI_TENANTS_ALLOWLIST` / `DENYLIST`) + `ai_tenant_excluded` warning. |
+| **1.15.0** | Dieline-candidate / dieline-size reconciliation: bbox-based geometry detection now synthesises a candidate so `dieline.count` agrees with `dieline.size`. |
+
 The extracted `CodexDocument` carries six AI signal surfaces:
 
 | Field | Scope | Backend | Purpose |
@@ -198,6 +208,7 @@ response describing the AI lane's state:
 | --- | --- |
 | `ai_disabled` | Operator gate (`CODEX_AI_ENABLED`) is off. |
 | `ai_skipped` | Caller sent `X-Codex-Skip-AI: true`. |
+| `ai_tenant_excluded` | Operator opted in but the requesting tenant is gated out by `CODEX_AI_TENANTS_ALLOWLIST` / `DENYLIST` (1.14.0 +). |
 | `ai_missing_credentials` | Operator opted in but `anthropic` SDK isn't importable or `ANTHROPIC_API_KEY` is unset. |
 | `ai_tier` | Advisory — AI ran. `message` carries `cpu+claude` or `gpu` plus the realised dollar spend. |
 | `ai_budget_exceeded` | Per-request cost cap (`CODEX_AI_COST_CAP_USD_PER_REQUEST`, default `$0.10`) was hit mid-extract. |

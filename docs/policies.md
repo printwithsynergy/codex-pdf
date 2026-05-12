@@ -133,20 +133,32 @@ extraction even when the operator has it on. Same warning shape
 (`code="ai_skipped"`) so consumers can render an honest "AI signals
 not run for this request" state.
 
+### Per-tenant entitlements (1.14.0 +)
+
+Operators can pilot AI on a subset of tenants before rolling it out
+fleet-wide:
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_AI_TENANTS_ALLOWLIST` | unset | Comma-separated tenant slugs. When set, ONLY these tenants run AI; everyone else gets `ai_tenant_excluded`. |
+| `CODEX_AI_TENANTS_DENYLIST` | unset | Comma-separated tenant slugs blocked from AI. Allowlist wins when both are set. |
+
 ### Warning catalogue
 
 | `code` | `scope` | Meaning |
 | --- | --- | --- |
 | `ai_disabled` | `signals.ai` | Operator gate is off. Affects every request. |
 | `ai_skipped` | `signals.ai` | Caller opted out for this request. |
+| `ai_tenant_excluded` | `signals.ai` | Operator opted in but the requesting tenant is gated out by `CODEX_AI_TENANTS_ALLOWLIST` / `DENYLIST` (1.14.0 +). |
 | `ai_missing_credentials` | `signals.ai` | Operator opted in but the `anthropic` SDK isn't importable or `ANTHROPIC_API_KEY` is unset. Install `codex-pdf[ai]` and set the key to populate signal fields. |
 | `ai_tier` | `signals.ai` | Informational. Emitted on every extract when AI ran; the warning's `message` carries `"cpu+claude"` (Tier 1) or `"gpu"` (Tier 2) plus the realised dollar spend, so consumers know which backend produced the signals and what it cost. |
 | `ai_budget_exceeded` | `signals.<kind>` | The per-request cost cap (`CODEX_AI_COST_CAP_USD_PER_REQUEST`) was hit mid-extract; signal fields for the affected kinds are empty. Combines additively with `ai_tier`. |
 
-Exactly one of `ai_disabled` / `ai_skipped` / `ai_missing_credentials`
-/ `ai_tier` always lands on every `/v1/extract` response. Consumers
-MUST NOT branch on the absence of these warnings — branch on the
-presence of the specific code instead.
+Exactly one of `ai_disabled` / `ai_skipped` / `ai_tenant_excluded` /
+`ai_missing_credentials` / `ai_tier` always lands on every
+`/v1/extract` response. Consumers MUST NOT branch on the absence
+of these warnings — branch on the presence of the specific code
+instead.
 
 ### Cache key contract
 

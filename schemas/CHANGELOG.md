@@ -1,5 +1,55 @@
 # Schema Changelog
 
+## 1.15.0 — 2026-05-12
+
+Dieline.count / dieline.size reconciliation. **Schema unchanged at
+1.3.0**.
+
+### Behaviour change
+
+When the bbox-based geometry-fallback in
+``_extract_dieline_metrics`` produces a real ``dieline.size``
+(source ``analysis_stroke_bbox``) but no named candidate hit any
+of the registry-driven paths, codex now synthesises a placeholder
+``CodexSummaryDielineCandidate`` so ``dieline.count`` agrees with
+``dieline.size`` and consumers don't see "Detected dieline size
+4.98 x 6.53 in" alongside "Dieline candidates: 0".
+
+### Forward-compatible literal extensions
+
+- ``CodexSummaryDielineCandidate.source`` literal gains
+  ``"analysis_stroke_bbox"``.
+- ``CodexSummaryDielineCandidate.reason_codes`` literal gains
+  ``"geometry_fallback_size_detected"``.
+
+Per `docs/policies.md`'s forward-compatibility rule, consumers MUST
+treat the Literal unions as open enums.
+
+## 1.13.0 — 2026-05-12
+
+Phase 4 — AI signal model versioning + SLOs. **Schema unchanged at
+1.3.0**; adds advisory metadata.
+
+### New /v1/contract surface
+
+- ``ai_model_versions: dict[str, dict[str, str]]`` mirrors
+  ``codex_pdf.ai.versions.AI_MODEL_VERSIONS``. SDK consumers pin
+  against the exact extractor that produced a signal. Bump the
+  per-kind ``prompt`` constant whenever the system prompt changes
+  so consumers can invalidate stale caches deliberately.
+
+### New Prometheus metric
+
+- ``codex_ai_signal_calls_total{kind, model, status}`` counter
+  on ``/metrics``. Operators chart per-kind success rate / cost-cap
+  hits / model rollover drift.
+
+### Docs
+
+- `docs/slos.md` gains an "AI signal SLOs" section covering
+  latency bands, cost cap targets, per-extractor success-rate
+  floors.
+
 ## 1.14.0 — 2026-05-12
 
 Codex AI Signal Campaign — Phase 2 (operational contract). Per-

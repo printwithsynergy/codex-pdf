@@ -62,7 +62,7 @@ Sample contract response:
 {
   "contract_name": "codex-document",
   "schema_version": "1.3.0",
-  "package_version": "1.11.0",
+  "package_version": "1.15.0",
   "schema_id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
   "endpoints": [
     "POST /v1/extract",
@@ -74,9 +74,23 @@ Sample contract response:
   "section_schema_versions": {
     "color": "1.0.0",
     "geom": "1.0.0"
+  },
+  "ai_model_versions": {
+    "language":       { "model": "claude-haiku-4-5",  "prompt": "lang-1",   "schema": "1.0.0" },
+    "logos":          { "model": "claude-sonnet-4-6", "prompt": "logos-1",  "schema": "1.0.0" },
+    "symbols":        { "model": "claude-sonnet-4-6", "prompt": "symbols-1","schema": "1.0.0" },
+    "barcodes":       { "model": "pyzbar+pylibdmtx",  "prompt": "n/a",      "schema": "1.0.0" },
+    "classification": { "model": "claude-haiku-4-5",  "prompt": "class-1",  "schema": "1.0.0" },
+    "spell":          { "model": "claude-haiku-4-5",  "prompt": "spell-1",  "schema": "1.0.0" }
   }
 }
 ```
+
+`ai_model_versions` was added in 1.13.0 (AI Signal Phase 4). It
+mirrors `codex_pdf.ai.versions.AI_MODEL_VERSIONS` so SDK consumers
+can pin against the exact extractor that produced a signal. Bump
+the per-kind `prompt` constant whenever the system prompt changes
+so consumers can invalidate stale caches deliberately.
 
 Every per-section response also carries `schema_version` inline
 (e.g. `ColorResolveResponse.schema_version`) so a consumer that
