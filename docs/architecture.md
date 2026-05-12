@@ -30,7 +30,10 @@ order: 2
    boxes, fonts, images, color spaces (with Separation tint
    transforms evaluated at `t=1.0` so spot inks land on the right
    swatch), OCG / layers, annotations, transparency, trapping,
-   form XObjects.
+   form XObjects. Optional AI signal extractors (1.10.0 +) populate
+   `detected_language`, `detected_logos`, `detected_symbols`,
+   `detected_barcodes`, and `document_classification`; see
+   [`policies.md`](./policies.md#ai-signals-130).
 3. Output is serialized as JSON against the published schemas in
    `schemas/v1/`. Each section (document, color, geom) versions
    independently and reports its `schema_version` inline.

@@ -52,7 +52,7 @@ exactly the surface they validate.
 
 | Section | Version constant | Current value | Bump policy |
 |---|---|---|---|
-| document (codex-document) | embedded in `/v1/contract.schema_version` | `1.0.0` | additive bumps remain `1.x`; breaking changes go to `2.0.0` |
+| document (codex-document) | embedded in `/v1/contract.schema_version` | `1.3.0` | additive bumps remain `1.x`; breaking changes go to `2.0.0` |
 | color | `codex_pdf.color.COLOR_SCHEMA_VERSION` | `1.0.0` | bump on any change to `/v1/color/*` request/response shapes |
 | geom | `codex_pdf.geom.GEOM_SCHEMA_VERSION` | `1.0.0` | bump on any change to `/v1/geom/*` request/response shapes |
 
@@ -61,10 +61,16 @@ Sample contract response:
 ```json
 {
   "contract_name": "codex-document",
-  "schema_version": "1.1.0",
-  "package_version": "1.8.1",
+  "schema_version": "1.3.0",
+  "package_version": "1.10.0",
   "schema_id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
-  "endpoints": ["POST /v1/extract", "POST /v1/probe", "POST /v1/extract/stream", "..."],
+  "endpoints": [
+    "POST /v1/extract",
+    "POST /v1/probe",
+    "POST /v1/extract/stream",
+    "GET /v1/documents/{pdf_hash}/signals/{kind}",
+    "..."
+  ],
   "section_schema_versions": {
     "color": "1.0.0",
     "geom": "1.0.0"

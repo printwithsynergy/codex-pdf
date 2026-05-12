@@ -170,6 +170,41 @@ Clause coverage is the minimum-viable set in the rc.x series. Full
 ISO coverage lands in later phases; the framework is registry-
 driven, so new clauses are additive only.
 
+## AI signals (1.10.0 +)
+
+Codex 1.10.0 lands the AI Signal Phase 0 contract. The extracted
+`CodexDocument` carries four new optional fields per page:
+
+| Field | Purpose |
+| --- | --- |
+| `detected_language` | ISO-639 code + confidence. |
+| `detected_logos` | Bounding boxes + brand label + confidence. |
+| `detected_symbols` | Trademark/symbol detection (™, ®, etc.) with positions. |
+| `detected_barcodes` | Type + value + bounding box per barcode. |
+
+Plus a top-level `document_classification: dict[str, float]` map
+(e.g. `{"invoice": 0.92, "label": 0.04}`).
+
+The dedicated endpoint `GET /v1/documents/{pdf_hash}/signals/{kind}`
+returns the same shapes scoped to one signal kind, so consumers can
+re-fetch a single signal without re-running extraction.
+
+**Phase 0 status**: the contract is frozen; implementations land in
+Phase 1. While the runtime is still wired through, codex emits a
+structured `CodexWarning` on every `/v1/extract` response so
+consumers can render an honest "AI signals not run for this
+request" state:
+
+| Warning `code` | When |
+| --- | --- |
+| `ai_disabled` | Operator gate (`CODEX_AI_ENABLED`) is off. |
+| `ai_skipped` | Caller sent `X-Codex-Skip-AI: true`. |
+| `ai_signals_pending_impl` | AI enabled but Phase 1 implementation not yet deployed. |
+
+See [`policies.md`](./policies.md#ai-signals-130) for the full
+warning catalogue, cache-key contract, and the two-backend
+(CPU + Claude default vs optional GPU) policy.
+
 ## End-to-end example
 
 ```python
