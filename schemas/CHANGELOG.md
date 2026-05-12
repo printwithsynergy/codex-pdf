@@ -1,12 +1,17 @@
 # Schema Changelog
 
-## Unreleased
+## 1.10.0 — 2026-05-12
 
 Codex AI Signal Campaign — Phase 0 (contract freeze). Additive
 fields + new per-resource endpoint for AI-derived detection signals
 that move from lint-pdf's `AI_*` rule namespace into codex's
 data-collection layer. Schema bump `1.2.0` → `1.3.0` (additive,
 fully backward compatible).
+
+Two backends documented: Tier 1 (CPU + Claude only — default,
+demo, OSS) and Tier 2 (optional GPU — SaaS / Enterprise via
+`CODEX_AI_GPU_URL`). Public demo MUST stay on Tier 1. See
+`docs/policies.md` > "Two AI backends".
 
 ### New top-level surface
 

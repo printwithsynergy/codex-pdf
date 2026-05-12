@@ -210,3 +210,51 @@ empty signal fields when projected Claude spend on a single
 `/v1/extract` exceeds the cap. Same pattern lint-pdf's
 `ai/cost_cap.py` already uses. Acts as a guard rail against
 runaway costs on a single huge PDF.
+
+## Canonical Codex Stack (Railway recipe)
+
+Every Railway project that consumes codex should provision the same
+set of services. Naming convention is `<purpose>-<host>` where
+`<host>` is the project's short name (`lint`, `compile`, `pws`,
+`codex`, `loupe`). This keeps logs + dashboards groupable across
+the fleet.
+
+### Required services
+
+| Service name pattern | What it does | Source |
+| --- | --- | --- |
+| `codex-pdf-<host>-sidecar` | Codex extraction API. Read-only PDF facts. Auto-deploys from `printwithsynergy/codex-pdf` `main`. | this repo, `Dockerfile` |
+| `codex-speculator-<host>` | Cache pre-warmer; subscribes to Redis stream `codex:speculate` and runs Phase 1 + 2 extracts ahead of demand. | this repo, `railway.speculator.toml` |
+| `redis-<host>-managed` | Railway-managed Redis. Shared between the codex sidecar, the speculator, and (optionally) the host app's render cache. | Railway Redis template |
+
+### Optional services
+
+| Service name pattern | When | Notes |
+| --- | --- | --- |
+| `codex-vision-<host>-sidecar` | When the host needs font similarity, NSFW classification, visual diff, or perceptual-hash dedup without GPU spend. | **This is classical computer vision, not LLM-AI.** Runs deterministic ONNX models (CLIP, NudeNet) on a 2 vCPU container. No per-call LLM bill. Scale-to-zero idle. See AI Signal Campaign Phase 1.5. |
+
+### Enterprise-only (opt-in)
+
+| Mechanism | When | Notes |
+| --- | --- | --- |
+| `CODEX_AI_GPU_URL` env on `codex-pdf-<host>-sidecar` | When the host needs sub-100ms vision overlays or very high volume (>5k jobs/day). | Points at an external Modal / RunPod / on-prem GPU service. **Default unset.** Public demo deployments MUST keep it unset. |
+
+### Per-project audit
+
+| Project | Required services present? | Notes |
+| --- | --- | --- |
+| `lintpdf.com` | ✅ codex-pdf-lint-sidecar + codex-speculator + redis-lint-managed | + vision-sidecar pending Phase 1.5 |
+| `compile-pdf.com` | ⚠️ missing — needs `codex-pdf-compile-sidecar` + `codex-speculator-compile` + `redis-compile-managed` | Add via Railway dashboard or `railway.toml` checked into compile-pdf-marketing/codex-sidecar/. |
+| `codex-pdf-marketing` | ⚠️ presumed missing | Same checklist. Token-scope-restricted; needs separate audit. |
+| `loupe-pdf-marketing` | ⚠️ unknown | Token-scope-restricted; needs separate audit. |
+| Print With Synergy (production SaaS) | ❌ codex stack absent entirely. Currently only runs `lint-pdf` + `lint-pdf-ui`. | Production should be using the codex contract via a sidecar in the same project. Currently lint-pdf must be re-parsing PDFs itself. |
+
+Operators bring deployments into compliance by:
+
+1. Deploying `codex-pdf` (this repo, `main`) as a new Railway service named `codex-pdf-<host>-sidecar`.
+2. Deploying it again with `railway.speculator.toml` as `codex-speculator-<host>`.
+3. Provisioning Railway-managed Redis named `redis-<host>-managed`.
+4. Setting `CODEX_REDIS_URL = "${{redis-<host>-managed.REDIS_URL}}"` on the sidecar + speculator.
+5. (Optional) Adding `codex-vision-<host>-sidecar` once Phase 1.5 lands.
+
+The host app then talks to codex over Railway's private network at `https://codex-pdf-<host>-sidecar.railway.internal`.
