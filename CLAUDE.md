@@ -40,7 +40,9 @@ deployments route on the ``X-Codex-Tenant`` request header.
   (id `1fb13ff5-0c5c-4c8f-90dc-0fd5b447a937`).
 - URL: `https://codex-pdf-lint-sidecar-production.up.railway.app`.
 - Source: `printwithsynergy/codex-pdf` `main`, root `Dockerfile`,
-  `numReplicas = 3`.
+  `numReplicas = 1` (single replica is enough for the lintpdf.com
+  demo traffic profile; scale via Railway GraphQL `serviceInstanceUpdate`
+  when traffic warrants).
 - Auth: bearer (`CODEX_BEARER_TOKEN`) or internal (`CODEX_INTERNAL_TOKEN`).
 - Backing Redis: `redis://default:…@redis.railway.internal:6379`
   (set on the service as `CODEX_REDIS_URL`).

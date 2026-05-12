@@ -123,6 +123,7 @@ from codex_pdf.render.separations import (
     sample_color,
     sample_density,
 )
+from codex_pdf.ai import build_context, run_signal, run_signals_on_document
 from codex_pdf.schema import codex_document_schema, load_published_schema
 from codex_pdf.version import VERSION
 
@@ -941,12 +942,32 @@ async def _extract_impl(
         # Warm the page-1 render cache in the background — don't block the response.
         asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw, tenant))
         await _maybe_retain(request, raw, sha, payload, retain_form_value)
-        # AI-signal status: codex emits a warning here so callers
-        # never have to guess why ``detected_language`` / ``detected_logos`` /
-        # etc. came back empty. Phase 0 always emits one of the two
-        # — implementation lands in Phase 1.
+        # AI signal lane (Phase 1, 1.11.0): when CODEX_AI_ENABLED=true
+        # and the caller didn't opt out, run the six extractors and
+        # mutate the payload in place. ``extra_warnings`` covers
+        # partial completion (cost cap hit mid-run).
+        extra_ai_warnings: list[dict[str, str]] = []
+        ai_context = build_context(caller_skipped=_ai_skipped(request))
         if isinstance(payload, dict):
-            _annotate_ai_status(payload, request)
+            if ai_context.runnable:
+                def _run_ai() -> list[dict[str, str]]:
+                    return run_signals_on_document(
+                        context=ai_context,
+                        cache=_cache,
+                        pdf_bytes=raw,
+                        payload=payload,
+                        tenant=tenant,
+                        pdf_hash=sha,
+                    )
+
+                extra_ai_warnings = await loop.run_in_executor(None, _run_ai)
+            _annotate_ai_status(
+                payload,
+                request,
+                ai_ran=ai_context.runnable,
+                cost_spent_usd=ai_context.budget.spent_usd,
+                extra_warnings=extra_ai_warnings,
+            )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         durations = {"extract": elapsed_ms}
         _record_stage("extract", elapsed_ms)
@@ -1816,21 +1837,34 @@ def _ai_skipped(request: Request) -> bool:
     return raw in {"true", "1", "yes", "on"}
 
 
-def _annotate_ai_status(payload: dict[str, Any], request: Request) -> None:
+_AI_TIER_MESSAGE = (
+    "AI signal extraction ran on Tier 1 (CPU + Claude). Set "
+    "``CODEX_AI_GPU_URL`` to route eligible kinds to a self-hosted GPU "
+    "service (Tier 2)."
+)
+
+
+def _annotate_ai_status(
+    payload: dict[str, Any],
+    request: Request,
+    *,
+    ai_ran: bool,
+    cost_spent_usd: float = 0.0,
+    extra_warnings: list[dict[str, str]] | None = None,
+) -> None:
     """Append an AI-status ``CodexWarning`` to the extract response.
 
-    Always emits exactly one of:
-    - ``code="ai_disabled"`` when the operator hasn't set
-      ``CODEX_AI_ENABLED=true``;
-    - ``code="ai_skipped"`` when the caller sent
-      ``X-Codex-Skip-AI: true``;
-    - ``code="ai_enabled"`` (advisory) when AI signal extraction is
-      active. Phase 0 never sets this code because no AI extractor is
-      wired yet — but the slot is published so consumers don't have
-      to guess what "AI is on" looks like.
+    Exactly one of these codes always lands:
 
-    Operator-off beats caller-off when both are set (operator gate
-    runs first; caller never sees an off deployment differently).
+    - ``ai_disabled`` — operator hasn't set ``CODEX_AI_ENABLED=true``.
+    - ``ai_skipped`` — caller sent ``X-Codex-Skip-AI: true``.
+    - ``ai_missing_credentials`` — operator opted in but ``anthropic``
+      isn't importable or ``ANTHROPIC_API_KEY`` is unset.
+    - ``ai_tier`` (advisory) — AI ran. ``message`` carries the tier
+      label (``cpu+claude`` for Tier 1, ``gpu`` for Tier 2).
+
+    Additional advisory warnings (``ai_budget_exceeded``) come in via
+    ``extra_warnings``.
     """
     operator_on = _ai_enabled()
     caller_off = _ai_skipped(request)
@@ -1855,23 +1889,28 @@ def _annotate_ai_status(payload: dict[str, Any], request: Request) -> None:
             ),
             "scope": "signals.ai",
         }
-    else:
-        # AI is enabled and the caller did not opt out — Phase 0 still
-        # doesn't have an extractor wired, so emit an advisory so
-        # consumers know they're reading an empty surface until Phase
-        # 1 lands.
+    elif not ai_ran:
         warning = {
-            "code": "ai_signals_pending_impl",
+            "code": "ai_missing_credentials",
             "message": (
-                "AI signal extraction is enabled but the Phase 1 "
-                "implementation is not deployed yet. See CAMPAIGN.md "
-                "> 'Codex AI Signal Campaign'."
+                "AI signal extraction is enabled but the anthropic SDK "
+                "is not importable or ANTHROPIC_API_KEY is unset. "
+                "Install codex-pdf[ai] and set the key to populate AI "
+                "signal fields."
             ),
+            "scope": "signals.ai",
+        }
+    else:
+        warning = {
+            "code": "ai_tier",
+            "message": f"cpu+claude (spent ${cost_spent_usd:.4f})",
             "scope": "signals.ai",
         }
     warnings = payload.setdefault("extraction_warnings", [])
     if isinstance(warnings, list):
         warnings.append(warning)
+        if extra_warnings:
+            warnings.extend(extra_warnings)
 
 
 class SignalResponse(BaseModel):
@@ -1943,6 +1982,7 @@ async def signal_endpoint(
     response: Response,
     pdf_hash: str,
     kind: str,
+    page_index: int = 0,
 ) -> SignalResponse:
     if not _looks_like_sha256(pdf_hash):
         raise HTTPException(
@@ -1958,11 +1998,60 @@ async def signal_endpoint(
             ),
         )
 
-    raise NotImplementedError(
-        "AI signal extraction is not implemented yet (Codex AI Signal "
-        "Campaign Phase 0); the public contract is published so "
-        "consumers can wire against it ahead of the rollout. See "
-        "CAMPAIGN.md > 'Codex AI Signal Campaign' for the rollout plan."
+    started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "signal")
+    ai_context = build_context(caller_skipped=_ai_skipped(request))
+    ai_status_label: Literal["enabled", "disabled", "skipped"]
+    if not _ai_enabled():
+        ai_status_label = "disabled"
+    elif _ai_skipped(request):
+        ai_status_label = "skipped"
+    else:
+        ai_status_label = "enabled"
+
+    pdf_bytes = _blob_store.get(pdf_hash, tenant=tenant)
+    if pdf_bytes is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"no PDF cached for tenant={tenant!r} pdf_hash={pdf_hash}; "
+                f"POST /v1/extract first"
+            ),
+        )
+
+    payload: dict[str, Any] | None = None
+    if kind in {"language", "spell", "classification"}:
+        # Text-only kinds need the codex document to read page text.
+        loop = asyncio.get_event_loop()
+        payload = await loop.run_in_executor(None, _run_extract, pdf_bytes, tenant)
+
+    use_page_index: int | None = page_index if kind != "classification" else None
+
+    loop = asyncio.get_event_loop()
+
+    def _run_one() -> Any:
+        return run_signal(
+            context=ai_context,
+            cache=_cache,
+            pdf_bytes=pdf_bytes,
+            payload=payload or {},
+            tenant=tenant,
+            pdf_hash=pdf_hash,
+            kind=kind,
+            page_index=use_page_index,
+        )
+
+    result = await loop.run_in_executor(None, _run_one)
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    _record_stage("signal", elapsed_ms)
+    _record("signal", 200, time.perf_counter() - started)
+    return SignalResponse(
+        pdf_hash=pdf_hash,
+        kind=kind,
+        ai_status=ai_status_label,
+        data=result.data,
+        stage_durations_ms={"signal": elapsed_ms},
     )
 
 

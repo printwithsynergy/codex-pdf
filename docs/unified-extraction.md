@@ -170,36 +170,37 @@ Clause coverage is the minimum-viable set in the rc.x series. Full
 ISO coverage lands in later phases; the framework is registry-
 driven, so new clauses are additive only.
 
-## AI signals (1.10.0 +)
+## AI signals (1.11.0)
 
-Codex 1.10.0 lands the AI Signal Phase 0 contract. The extracted
-`CodexDocument` carries four new optional fields per page:
+Codex 1.11.0 implements the AI Signal contract frozen in 1.10.0.
+The extracted `CodexDocument` carries six AI signal surfaces:
 
-| Field | Purpose |
-| --- | --- |
-| `detected_language` | ISO-639 code + confidence. |
-| `detected_logos` | Bounding boxes + brand label + confidence. |
-| `detected_symbols` | Trademark/symbol detection (™, ®, etc.) with positions. |
-| `detected_barcodes` | Type + value + bounding box per barcode. |
-
-Plus a top-level `document_classification: dict[str, float]` map
-(e.g. `{"invoice": 0.92, "label": 0.04}`).
+| Field | Scope | Backend | Purpose |
+| --- | --- | --- | --- |
+| `detected_language` | per page | Claude Haiku (text) | BCP-47 tag + confidence. |
+| `detected_logos` | per page | Claude Sonnet (vision) | Brand identity + bbox in PDF user-space points. |
+| `detected_symbols` | per page | Claude Sonnet (vision) | Regulatory / safety / sustainability symbols (GHS, recycling, FDA, CE, ™, ©, etc.). |
+| `detected_barcodes` | per page | pyzbar + pylibdmtx (CPU) | Decoded value + format + bbox. No Claude cost. |
+| `spell_candidates` | per page | Claude Haiku (text) | Suspect words for lint-pdf's tenant spell rule. |
+| `document_classification` | document | Claude Haiku (text) | Probability map (`{"label": 0.7, "folding_carton": 0.2}`). |
 
 The dedicated endpoint `GET /v1/documents/{pdf_hash}/signals/{kind}`
 returns the same shapes scoped to one signal kind, so consumers can
-re-fetch a single signal without re-running extraction.
+re-fetch a single signal without re-running the full extract. Pass
+`?page_index=N` for page-scoped kinds (`language`, `logos`,
+`symbols`, `barcodes`, `spell`); `classification` is document-scoped
+so the parameter is ignored.
 
-**Phase 0 status**: the contract is frozen; implementations land in
-Phase 1. While the runtime is still wired through, codex emits a
-structured `CodexWarning` on every `/v1/extract` response so
-consumers can render an honest "AI signals not run for this
-request" state:
+Codex emits a structured `CodexWarning` on every `/v1/extract`
+response describing the AI lane's state:
 
 | Warning `code` | When |
 | --- | --- |
 | `ai_disabled` | Operator gate (`CODEX_AI_ENABLED`) is off. |
 | `ai_skipped` | Caller sent `X-Codex-Skip-AI: true`. |
-| `ai_signals_pending_impl` | AI enabled but Phase 1 implementation not yet deployed. |
+| `ai_missing_credentials` | Operator opted in but `anthropic` SDK isn't importable or `ANTHROPIC_API_KEY` is unset. |
+| `ai_tier` | Advisory — AI ran. `message` carries `cpu+claude` or `gpu` plus the realised dollar spend. |
+| `ai_budget_exceeded` | Per-request cost cap (`CODEX_AI_COST_CAP_USD_PER_REQUEST`, default `$0.10`) was hit mid-extract. |
 
 See [`policies.md`](./policies.md#ai-signals-130) for the full
 warning catalogue, cache-key contract, and the two-backend

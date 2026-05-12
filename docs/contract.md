@@ -62,7 +62,7 @@ Sample contract response:
 {
   "contract_name": "codex-document",
   "schema_version": "1.3.0",
-  "package_version": "1.10.0",
+  "package_version": "1.11.0",
   "schema_id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
   "endpoints": [
     "POST /v1/extract",

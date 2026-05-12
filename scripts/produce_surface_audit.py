@@ -115,6 +115,10 @@ PIKEPDF_PYMUPDF_READ_ALLOWLIST: frozenset[str] = frozenset(
         "codex_pdf.api.url_ingest",  # PDF magic-byte sniff (no parser use)
         "codex_pdf.parity",
         "codex_pdf.cli",
+        # AI Signal lane (Phase 1, 1.11.0): the dispatcher rasterises
+        # pages with fitz for vision extractors and reads page bbox /
+        # dimensions. Read-only; no Pdf.save anywhere in the lane.
+        "codex_pdf.ai.dispatcher",
     }
 )
 

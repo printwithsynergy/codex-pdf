@@ -1113,11 +1113,11 @@ def test_extract_response_is_additive_only(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Codex AI Signal Campaign — Phase 0. Contract surface for AI signal
-# extraction. Endpoints raise NotImplementedError → 501 in Phase 0; tests
-# pin the request validation, opt-in / opt-out semantics, and the
-# extract-response warning emission so consumers can wire bindings ahead
-# of the implementation.
+# Codex AI Signal Campaign — Phase 1 (1.11.0). The six extractors are
+# wired through ``run_signals_on_document`` + ``run_signal``. Tests pin
+# request validation, gate semantics, and the warning catalogue. The
+# extractor implementations themselves are exercised in
+# ``tests/test_ai_*.py`` with the Anthropic client stubbed out.
 # ---------------------------------------------------------------------------
 
 
@@ -1131,9 +1131,12 @@ def test_signals_endpoint_validates_kind(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
-def test_signals_endpoint_phase_0_returns_501(client: TestClient) -> None:
+def test_signals_endpoint_404_when_pdf_not_cached(client: TestClient) -> None:
+    """A signal request for a PDF the tenant hasn't uploaded yet
+    returns 404 — codex doesn't fetch / lazy-create. Callers POST to
+    /v1/extract first."""
     resp = client.get(f"/v1/documents/{_ZERO_SHA}/signals/language")
-    assert resp.status_code == 501
+    assert resp.status_code == 404
 
 
 def test_extract_emits_ai_disabled_warning_by_default(client: TestClient) -> None:
@@ -1171,23 +1174,26 @@ def test_extract_emits_ai_skipped_when_caller_opts_out(
     assert "ai_disabled" not in codes
 
 
-def test_extract_emits_pending_impl_when_ai_enabled(
+def test_extract_emits_missing_credentials_when_key_unset(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Phase 0 advisory: operator gate is on, caller is in, but the
-    Phase 1 implementation isn't deployed. The warning surfaces that
-    explicitly so consumers don't silently treat empty signals as
-    real."""
+    """Operator opted in but ANTHROPIC_API_KEY isn't on the
+    deployment. Codex emits ``ai_missing_credentials`` and the
+    signal fields stay empty."""
     monkeypatch.setenv("CODEX_AI_ENABLED", "true")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     pdf_bytes = PDF_PATH.read_bytes()
     resp = client.post(
         "/v1/extract",
         files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
     )
     assert resp.status_code == 200
-    warnings = resp.json().get("extraction_warnings") or []
+    body = resp.json()
+    warnings = body.get("extraction_warnings") or []
     codes = {w.get("code") for w in warnings if isinstance(w, dict)}
-    assert "ai_signals_pending_impl" in codes, codes
+    assert "ai_missing_credentials" in codes, codes
+    # Verify the signal fields really did stay empty.
+    assert body.get("document_classification") in (None, {})
 
 
 def test_contract_lists_signals_endpoint(client: TestClient) -> None:
