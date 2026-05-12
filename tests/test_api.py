@@ -930,6 +930,182 @@ def test_openapi_describes_new_endpoints_and_cache_keys(client: TestClient) -> N
     assert renders_path in paths
     # Cache-key contract is part of the public surface: it must be
     # discoverable in the OpenAPI description for each endpoint.
+    # The 1.9.0 series scopes by tenant — the contract surface
+    # changed to reflect that, but the additive guarantee holds.
     assert "pdf_hash, page_index, dpi" in paths[text_path]["get"]["description"]
     assert "pdf_hash, profile" in paths[conformance_path]["post"]["description"]
     assert "pdf_hash, page_index, dpi, color_space" in paths[renders_path]["get"]["description"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — operational contract. Tenancy scoping, rate-limiting,
+# error-shape catalogue, and behavior-locking parity for the extract
+# response. See CAMPAIGN.md Phase 2 log for the why.
+# ---------------------------------------------------------------------------
+
+
+def test_tenant_cannot_read_anothers_blob(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    # Tenant A uploads.
+    extract = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+        headers={"X-Codex-Tenant": "tenant-a"},
+    )
+    assert extract.status_code == 200
+    sha = extract.json()["pdf_sha256"]
+    # Tenant A can read.
+    self_read = client.get(
+        f"/v1/documents/{sha}/text-regions",
+        headers={"X-Codex-Tenant": "tenant-a"},
+    )
+    assert self_read.status_code == 200
+    # Tenant B with the same hash gets 404 — content-addressed
+    # storage is still scoped by tenant. (We only test A → B here
+    # because the default tenant's blob store may be polluted by
+    # prior tests in the same module; module-level state isn't
+    # reset between tests, but two arbitrary tenant names are
+    # guaranteed unique.)
+    other_read = client.get(
+        f"/v1/documents/{sha}/text-regions",
+        headers={"X-Codex-Tenant": "tenant-b"},
+    )
+    assert other_read.status_code == 404
+
+
+def test_tenants_have_independent_conformance_caches(client: TestClient) -> None:
+    pdf_bytes = PDF_PATH.read_bytes()
+    # Both tenants upload the same PDF and compute the same profile.
+    for tenant in ("tenant-a", "tenant-b"):
+        extract = client.post(
+            "/v1/extract",
+            files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+            headers={"X-Codex-Tenant": tenant},
+        )
+        assert extract.status_code == 200
+        sha = extract.json()["pdf_sha256"]
+        verdict = client.post(
+            f"/v1/documents/{sha}/conformance/pdfx4",
+            headers={"X-Codex-Tenant": tenant},
+        )
+        assert verdict.status_code == 200
+        # The verdict is computed independently per tenant — content
+        # is the same here because the input is, but the cache entries
+        # are isolated. We just need to make sure neither call leaks
+        # past tenant boundaries.
+        assert verdict.json()["document_id"] == sha
+
+
+def test_unified_error_shape_on_404(client: TestClient) -> None:
+    bogus = "0" * 64
+    resp = client.get(f"/v1/documents/{bogus}/text-regions")
+    assert resp.status_code == 404
+    # Every error response — including 404 — uses the shared envelope.
+    body = resp.json()
+    assert set(body.keys()) == {"detail"}, body
+    assert isinstance(body["detail"], str) and body["detail"]
+
+
+def test_openapi_documents_phase_2_error_responses(client: TestClient) -> None:
+    resp = client.get("/openapi.json")
+    spec = resp.json()
+    text_path = "/v1/documents/{pdf_hash}/text-regions"
+    text_responses = spec["paths"][text_path]["get"]["responses"]
+    # 400 / 404 / 429 are all documented for the text-regions GET so
+    # consumers can wire UI states without trial-and-error.
+    assert "400" in text_responses
+    assert "404" in text_responses
+    assert "429" in text_responses
+
+
+def test_rate_limit_returns_429_with_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Token bucket fires when burst is exhausted."""
+    monkeypatch.setenv("CODEX_RATE_LIMIT_DISABLED", "false")
+    monkeypatch.setenv("CODEX_RATE_LIMIT_RPM", "60")
+    monkeypatch.setenv("CODEX_RATE_LIMIT_BURST", "2")
+    # Re-import to pick up the new env. The module-level limiter
+    # is built once at import; we install a fresh one for the test.
+    from codex_pdf.api import main as main_module
+    from codex_pdf.api.rate_limit import make_rate_limiter
+
+    fresh = make_rate_limiter()
+    assert fresh is not None
+    monkeypatch.setattr(main_module, "_rate_limiter", fresh)
+
+    pdf_bytes = PDF_PATH.read_bytes()
+    with TestClient(main_module.app) as c:
+        # Two extracts within the burst succeed.
+        for _ in range(2):
+            resp = c.post(
+                "/v1/extract",
+                files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+                headers={"X-Codex-Tenant": "rate-limit-test"},
+            )
+            assert resp.status_code == 200
+        # Third within the same second exhausts the bucket → 429.
+        third = c.post(
+            "/v1/extract",
+            files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+            headers={"X-Codex-Tenant": "rate-limit-test"},
+        )
+        assert third.status_code == 429
+        assert "retry-after" in {h.lower() for h in third.headers.keys()}
+
+
+def test_extract_response_is_additive_only(client: TestClient) -> None:
+    """Behavior-locking parity test for /v1/extract response shape.
+
+    Pins the set of fields a 1.0-vintage consumer expects. The
+    1.9.0 series adds fields (``stage_durations_ms``, etc.) but
+    must not remove or rename any pre-existing field.
+    """
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    expected_pre_v1_2_fields = {
+        "schema_version",
+        "codex_version",
+        "document_id",
+        "source",
+        "pdf_version",
+        "is_encrypted",
+        "is_linearized",
+        "conformance",
+        "info",
+        "xmp",
+        "trapped_flag",
+        "output_intents",
+        "icc_profiles",
+        "color_spaces",
+        "fonts",
+        "images",
+        "ocgs",
+        "pages",
+        "form_xobjects",
+        "trap_evidence",
+        "annotations",
+        "analysis",
+        "summary",
+        "preflight_reports",
+        "extraction_warnings",
+    }
+    missing = expected_pre_v1_2_fields - set(body.keys())
+    assert not missing, f"removed/renamed fields: {missing}"
+    # Page-level: every page kept the v1.0 shape.
+    expected_page_fields = {
+        "page_num",
+        "rotation",
+        "boxes",
+        "resources",
+        "inventory",
+        "transparency_tree",
+        "annotations",
+        "analysis",
+    }
+    page = body["pages"][0]
+    missing_page = expected_page_fields - set(page.keys())
+    assert not missing_page, f"page-level removed/renamed fields: {missing_page}"

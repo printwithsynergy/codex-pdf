@@ -27,18 +27,30 @@ from codex_pdf.version import VERSION
 logger = logging.getLogger(__name__)
 
 
-def cache_key(pdf_bytes: bytes, args: dict[str, Any], *, kind: str) -> str:
+def cache_key(
+    pdf_bytes: bytes,
+    args: dict[str, Any],
+    *,
+    kind: str,
+    tenant: str = "default",
+) -> str:
     """Content-addressed cache key for one render result.
 
     ``kind`` segregates by endpoint family ("page", "separations",
     "heatmap", "layer", "sample-color", "sample-density",
     "walk-content-stream") so identical args from different endpoints
     don't collide.
+
+    ``tenant`` scopes the key per :data:`CODEX_TENANT` so a hash that
+    one tenant cached can't be read by another. Defaults to
+    ``"default"`` for unauthenticated / single-tenant deployments;
+    callers derive the value from the ``X-Codex-Tenant`` request
+    header via :func:`codex_pdf.api.retention.normalise_tenant`.
     """
     pdf_sha = hashlib.sha256(pdf_bytes).hexdigest()
     args_blob = json.dumps(args, sort_keys=True, separators=(",", ":")).encode("utf-8")
     args_sha = hashlib.sha256(args_blob).hexdigest()
-    return f"codex:{VERSION}:{kind}:{pdf_sha}:{args_sha}"
+    return f"codex:{VERSION}:{kind}:{tenant}:{pdf_sha}:{args_sha}"
 
 
 class MemoryCache:

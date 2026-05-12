@@ -64,6 +64,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from codex_pdf.api.auth import authenticate
 from codex_pdf.api.blob_store import make_blob_store
 from codex_pdf.api.cache import cache_key, make_cache
+from codex_pdf.api.rate_limit import make_rate_limiter
 from codex_pdf.api.retention import (
     make_retention_store,
     normalise_tenant,
@@ -172,6 +173,51 @@ def _record(endpoint: str, status_code: int, duration: float) -> None:
 _cache = make_cache()
 _blob_store = make_blob_store()
 _retention_store = make_retention_store()
+_rate_limiter = make_rate_limiter()
+
+
+def _request_tenant(request: Request) -> str:
+    """Resolve the request's tenant via the ``X-Codex-Tenant`` header.
+
+    Falls back to ``"default"`` when the header is missing or invalid
+    (matches the retention path's tenant normalisation so a single
+    request sees a consistent tenant everywhere).
+    """
+    return normalise_tenant(request.headers.get("x-codex-tenant"))
+
+
+def _enforce_rate_limit(tenant: str, endpoint: str) -> None:
+    """Apply the process-wide rate limiter for compute-and-cache POSTs.
+
+    Raises ``HTTPException(429)`` with a ``Retry-After`` header when
+    the bucket is empty. No-op when the limiter is disabled via
+    ``CODEX_RATE_LIMIT_DISABLED=true``.
+    """
+    if _rate_limiter is None:
+        return
+    decision = _rate_limiter.acquire(tenant, endpoint)
+    if decision.allowed:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=(
+            f"rate limit exceeded for tenant={tenant!r} endpoint={endpoint!r}; "
+            f"retry after {decision.retry_after_seconds:.1f}s"
+        ),
+        headers={"Retry-After": str(max(1, int(decision.retry_after_seconds) + 1))},
+    )
+
+
+class ErrorResponse(BaseModel):
+    """Shared error envelope. Every 4xx/5xx response uses this shape.
+
+    Consumers should treat ``detail`` as opaque human-readable text;
+    machine-readable codes will arrive in a future minor under an
+    additive ``code`` field. The shape itself is part of the public
+    contract — additive only.
+    """
+
+    detail: str
 
 
 def _repo_root() -> Path:
@@ -490,6 +536,8 @@ async def _read_pdf_bytes(file: UploadFile) -> bytes:
 async def _resolve_pdf_bytes(
     pdf: UploadFile | None,
     pdf_sha256: str | None,
+    *,
+    tenant: str = "default",
 ) -> tuple[bytes, str]:
     """Get PDF bytes from either a multipart upload or the blob store.
 
@@ -497,12 +545,17 @@ async def _resolve_pdf_bytes(
     can pass ``pdf_sha256`` instead of re-uploading the file. Returns
     ``(raw_bytes, sha256_hex)``. Raises ``412`` if the hash isn't in
     the blob store and no upload was provided.
+
+    ``tenant`` scopes the blob lookup — Tenant B cannot read a hash
+    that Tenant A uploaded even if Tenant B somehow learns it. The
+    412 message is intentionally identical for "wrong tenant" and
+    "expired" so probing for a hash's owner is uninformative.
     """
     if pdf is not None:
         raw = await pdf.read()
         if raw:
             sha = hashlib.sha256(raw).hexdigest()
-            _blob_store.put(sha, raw)
+            _blob_store.put(sha, raw, tenant=tenant)
             return raw, sha
         # Fall through to blob lookup if upload was empty/blank but
         # a hash was also provided (browser quirks with optional
@@ -510,7 +563,7 @@ async def _resolve_pdf_bytes(
     if pdf_sha256:
         cleaned = pdf_sha256.strip()
         if cleaned:
-            cached = _blob_store.get(cleaned)
+            cached = _blob_store.get(cleaned, tenant=tenant)
             if cached is not None:
                 return cached, cleaned
             raise HTTPException(
@@ -712,8 +765,8 @@ async def _read_extract_pdf(request: Request, pdf: UploadFile | None) -> bytes:
     )
 
 
-def _run_extract(raw: bytes) -> dict[str, Any]:
-    key = cache_key(raw, {}, kind="extract")
+def _run_extract(raw: bytes, tenant: str = "default") -> dict[str, Any]:
+    key = cache_key(raw, {}, kind="extract", tenant=tenant)
     cached = _cache.get(key)
     if cached is not None:
         return json.loads(cached)
@@ -725,14 +778,14 @@ def _run_extract(raw: bytes) -> dict[str, Any]:
     return payload
 
 
-def _run_extract_phase1(raw: bytes) -> dict[str, Any]:
+def _run_extract_phase1(raw: bytes, tenant: str = "default") -> dict[str, Any]:
     """Phase 1 extract with sha-only cache key.
 
     Repeat traffic for the same PDF returns Phase 1 in <10 ms even if
     Phase 2 has never completed. The cache value is the JSON dump of
     the CodexDocument that ``extract_document_fast`` produces.
     """
-    key = cache_key(raw, {}, kind="extract-phase-1")
+    key = cache_key(raw, {}, kind="extract-phase-1", tenant=tenant)
     cached = _cache.get(key)
     if cached is not None:
         return json.loads(cached)
@@ -744,13 +797,13 @@ def _run_extract_phase1(raw: bytes) -> dict[str, Any]:
     return payload
 
 
-def _run_extract_phase1_minimal(raw: bytes) -> dict[str, Any]:
+def _run_extract_phase1_minimal(raw: bytes, tenant: str = "default") -> dict[str, Any]:
     """PyMuPDF-only Phase 1 for the granular SSE path.
 
     Cached under ``kind="extract-phase-1-min"`` so the granular and
     standard streaming endpoints don't fight over the same key.
     """
-    key = cache_key(raw, {}, kind="extract-phase-1-min")
+    key = cache_key(raw, {}, kind="extract-phase-1-min", tenant=tenant)
     cached = _cache.get(key)
     if cached is not None:
         return json.loads(cached)
@@ -761,8 +814,8 @@ def _run_extract_phase1_minimal(raw: bytes) -> dict[str, Any]:
     return payload
 
 
-def _run_probe_min(raw: bytes) -> dict[str, Any]:
-    key = cache_key(raw, {}, kind="probe-min")
+def _run_probe_min(raw: bytes, tenant: str = "default") -> dict[str, Any]:
+    key = cache_key(raw, {}, kind="probe-min", tenant=tenant)
     cached = _cache.get(key)
     if cached is not None:
         return json.loads(cached)
@@ -772,8 +825,8 @@ def _run_probe_min(raw: bytes) -> dict[str, Any]:
     return payload
 
 
-def _run_probe_std(raw: bytes) -> dict[str, Any]:
-    key = cache_key(raw, {}, kind="probe-std")
+def _run_probe_std(raw: bytes, tenant: str = "default") -> dict[str, Any]:
+    key = cache_key(raw, {}, kind="probe-std", tenant=tenant)
     cached = _cache.get(key)
     if cached is not None:
         return json.loads(cached)
@@ -783,7 +836,7 @@ def _run_probe_std(raw: bytes) -> dict[str, Any]:
     return payload
 
 
-def _pre_render_bg(raw: bytes) -> None:
+def _pre_render_bg(raw: bytes, tenant: str = "default") -> None:
     """Warm the render cache for page 1 at 72 DPI then 150 DPI.
 
     Runs in a thread pool. Two tiers so a thumbnail-only consumer
@@ -792,7 +845,9 @@ def _pre_render_bg(raw: bytes) -> None:
     """
     for dpi in (72, 150):
         try:
-            pre_key = cache_key(raw, {"page": 1, "dpi": dpi}, kind="pre-render")
+            pre_key = cache_key(
+                raw, {"page": 1, "dpi": dpi}, kind="pre-render", tenant=tenant
+            )
             if _cache.get(pre_key) is None:
                 pre_png = render_page(
                     raw, 1, dpi=dpi, ocg_on=[], ocg_off=[], simulate_overprint=True
@@ -826,18 +881,20 @@ async def _extract_impl(
     retain_form_value: str | None = None,
 ) -> JSONResponse:
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "extract")
     try:
         raw = await _read_extract_pdf(request, pdf)
         sha = hashlib.sha256(raw).hexdigest()
-        _blob_store.put(sha, raw)
+        _blob_store.put(sha, raw, tenant=tenant)
         loop = asyncio.get_event_loop()
-        payload = await loop.run_in_executor(None, _run_extract, raw)
+        payload = await loop.run_in_executor(None, _run_extract, raw, tenant)
         # Surface the cache key so clients can switch to hash-based
         # render calls without re-uploading on every interaction.
         if isinstance(payload, dict):
             payload["pdf_sha256"] = sha
         # Warm the page-1 render cache in the background — don't block the response.
-        asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw))
+        asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw, tenant))
         await _maybe_retain(request, raw, sha, payload, retain_form_value)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         durations = {"extract": elapsed_ms}
@@ -974,7 +1031,9 @@ async def retention_delete_endpoint(payload: _RetentionDeleteRequest) -> JSONRes
     return JSONResponse({"sha256": sha, "deleted": deleted})
 
 
-async def _read_probe_pdf(request: Request, pdf: UploadFile | None) -> bytes:
+async def _read_probe_pdf(
+    request: Request, pdf: UploadFile | None, *, tenant: str = "default"
+) -> bytes:
     """PDF source for /v1/probe.
 
     Multipart ``pdf`` field wins; otherwise accept a JSON body with
@@ -1004,7 +1063,7 @@ async def _read_probe_pdf(request: Request, pdf: UploadFile | None) -> bytes:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="JSON body must include 'pdf_sha256'",
             )
-        cached = _blob_store.get(sha)
+        cached = _blob_store.get(sha, tenant=tenant)
         if cached is None:
             raise HTTPException(
                 status_code=status.HTTP_412_PRECONDITION_FAILED,
@@ -1066,27 +1125,28 @@ async def probe_endpoint(
     the same sha return from cache in single-digit milliseconds.
     """
     started = time.perf_counter()
+    tenant = _request_tenant(request)
     try:
-        raw = await _read_probe_pdf(request, pdf)
+        raw = await _read_probe_pdf(request, pdf, tenant=tenant)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"read failed: {exc}") from exc
 
     sha = hashlib.sha256(raw).hexdigest()
-    _blob_store.put(sha, raw)
+    _blob_store.put(sha, raw, tenant=tenant)
     loop = asyncio.get_event_loop()
 
     async def _generate() -> AsyncIterator[str]:
         try:
-            ev1 = await loop.run_in_executor(None, _run_probe_min, raw)
+            ev1 = await loop.run_in_executor(None, _run_probe_min, raw, tenant)
             ev1 = {**ev1, "pdf_sha256": sha, "probe_phase": 1}
             yield f"data: {json.dumps(ev1, separators=(',', ':'))}\n\n"
         except Exception:
             pass
 
         try:
-            ev2 = await loop.run_in_executor(None, _run_probe_std, raw)
+            ev2 = await loop.run_in_executor(None, _run_probe_std, raw, tenant)
             ev2 = {**ev2, "pdf_sha256": sha, "probe_phase": 2}
             yield f"data: {json.dumps(ev2, separators=(',', ':'))}\n\n"
         except Exception:
@@ -1111,7 +1171,9 @@ def _model_dump_list(items: list) -> list:
     return [x.model_dump(mode="json") if hasattr(x, "model_dump") else x for x in items]
 
 
-async def _generate_granular_stream(raw: bytes, sha: str) -> AsyncIterator[str]:
+async def _generate_granular_stream(
+    raw: bytes, sha: str, tenant: str = "default"
+) -> AsyncIterator[str]:
     """Granular Phase 2 SSE: stream each pikepdf pass as its future settles.
 
     Order:
@@ -1129,7 +1191,7 @@ async def _generate_granular_stream(raw: bytes, sha: str) -> AsyncIterator[str]:
     # baseline so color/ocgs/forms ride in as separate events later.
     p1: dict[str, Any] | None = None
     try:
-        p1 = await loop.run_in_executor(None, _run_extract_phase1_minimal, raw)
+        p1 = await loop.run_in_executor(None, _run_extract_phase1_minimal, raw, tenant)
         out = {**p1, "pdf_sha256": sha, "extract_phase": 1}
         yield f"event: phase1\ndata: {json.dumps(out, separators=(',', ':'))}\n\n"
     except Exception:
@@ -1199,7 +1261,7 @@ async def _generate_granular_stream(raw: bytes, sha: str) -> AsyncIterator[str]:
         )
         payload_full = full.model_dump(mode="json")
         body = json.dumps(payload_full, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        _cache.set(cache_key(raw, {}, kind="extract"), body)
+        _cache.set(cache_key(raw, {}, kind="extract", tenant=tenant), body)
         out = {**payload_full, "pdf_sha256": sha, "extract_phase": 2}
         yield f"event: phase2_complete\ndata: {json.dumps(out, separators=(',', ':'))}\n\n"
     except Exception:
@@ -1228,6 +1290,8 @@ async def extract_stream_endpoint(
     individual signals the moment each pass finishes.
     """
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "extract_stream")
     try:
         raw = await _read_extract_pdf(request, pdf)
     except HTTPException:
@@ -1236,14 +1300,14 @@ async def extract_stream_endpoint(
         raise HTTPException(status_code=500, detail=f"read failed: {exc}") from exc
 
     sha = hashlib.sha256(raw).hexdigest()
-    _blob_store.put(sha, raw)
+    _blob_store.put(sha, raw, tenant=tenant)
     loop = asyncio.get_event_loop()
     use_granular = bool(granular)
 
     async def _generate_two_phase() -> AsyncIterator[str]:
         # Phase 1: PyMuPDF + parallel color/ocgs/forms — sha-keyed cache.
         try:
-            p1 = await loop.run_in_executor(None, _run_extract_phase1, raw)
+            p1 = await loop.run_in_executor(None, _run_extract_phase1, raw, tenant)
             p1 = {**p1, "pdf_sha256": sha, "extract_phase": 1}
             yield f"data: {json.dumps(p1, separators=(',', ':'))}\n\n"
         except Exception:
@@ -1251,7 +1315,7 @@ async def extract_stream_endpoint(
 
         # Phase 2: full extraction with the analysis pass merged in.
         try:
-            p2 = await loop.run_in_executor(None, _run_extract, raw)
+            p2 = await loop.run_in_executor(None, _run_extract, raw, tenant)
             if isinstance(p2, dict):
                 p2 = {**p2, "pdf_sha256": sha, "extract_phase": 2}
             yield f"data: {json.dumps(p2, separators=(',', ':'))}\n\n"
@@ -1260,12 +1324,12 @@ async def extract_stream_endpoint(
 
     async def _generate() -> AsyncIterator[str]:
         if use_granular:
-            async for chunk in _generate_granular_stream(raw, sha):
+            async for chunk in _generate_granular_stream(raw, sha, tenant):
                 yield chunk
         else:
             async for chunk in _generate_two_phase():
                 yield chunk
-        asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw))
+        asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw, tenant))
         _record("extract_stream", 200, time.perf_counter() - started)
 
     return StreamingResponse(
@@ -1382,11 +1446,36 @@ async def _not_implemented_handler(_request: Request, exc: NotImplementedError) 
         "Return cached detected text regions for one page of a previously "
         "extracted PDF. ``pdf_hash`` is the lower-case hex SHA-256 of the "
         "PDF bytes. Geometry is returned in PDF user-space points. "
-        "Cache key: ``(pdf_hash, page_index, dpi)``. Idempotent: the same "
-        "key returns the same bytes."
+        "Cache key: ``(tenant, pdf_hash, page_index, dpi)``. Idempotent: the "
+        "same key returns the same bytes. Tenant scoping (via the "
+        "``X-Codex-Tenant`` header, default ``default``) prevents cross-"
+        "tenant reads even if the hash is known."
     ),
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": (
+                "Invalid ``pdf_hash`` (not 64-char hex), invalid ``page_index`` "
+                "(< 0), or invalid ``dpi`` (outside [36, 900])."
+            ),
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": (
+                "No PDF cached for this ``(tenant, pdf_hash)``. Upload via "
+                "``POST /v1/extract`` first."
+            ),
+        },
+        429: {
+            "model": ErrorResponse,
+            "description": (
+                "Rate limit exceeded for this tenant. Honour ``Retry-After``."
+            ),
+        },
+    },
 )
 async def text_regions_endpoint(
+    request: Request,
     response: Response,
     pdf_hash: str,
     page_index: int = 0,
@@ -1409,7 +1498,8 @@ async def text_regions_endpoint(
         )
 
     started = time.perf_counter()
-    raw = _blob_store.get(pdf_hash)
+    tenant = _request_tenant(request)
+    raw = _blob_store.get(pdf_hash, tenant=tenant)
     if raw is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1419,7 +1509,9 @@ async def text_regions_endpoint(
             ),
         )
 
-    key = cache_key(raw, {"page_index": page_index, "dpi": dpi}, kind="text-regions")
+    key = cache_key(
+        raw, {"page_index": page_index, "dpi": dpi}, kind="text-regions", tenant=tenant
+    )
     cached = _cache.get(key)
     if cached is not None:
         payload = json.loads(cached)
@@ -1469,11 +1561,36 @@ async def text_regions_endpoint(
         "bytes. ``profile`` must be one of ``pdfx4``, ``pdfx1a``, ``pdfx3``, "
         "``pdfa1b``, ``pdfa2b``, ``pdfa3b``, ``pdfua1``; the enum is "
         "forward-compatible — consumers must treat unknown values as opaque. "
-        "Cache key: ``(pdf_hash, profile)``. Idempotent: a second call with "
-        "the same key returns the cached verdict bit-for-bit."
+        "Cache key: ``(tenant, pdf_hash, profile)``. Idempotent: a second call "
+        "with the same key returns the cached verdict bit-for-bit. Tenant "
+        "scoping (via the ``X-Codex-Tenant`` header) prevents cross-tenant "
+        "reads."
     ),
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": (
+                "Invalid ``document_id`` (not 64-char hex) or unknown "
+                "conformance profile."
+            ),
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": (
+                "No PDF cached for this ``(tenant, document_id)``. Upload "
+                "via ``POST /v1/extract`` first."
+            ),
+        },
+        429: {
+            "model": ErrorResponse,
+            "description": (
+                "Rate limit exceeded for this tenant. Honour ``Retry-After``."
+            ),
+        },
+    },
 )
 async def conformance_verdict_endpoint(
+    request: Request,
     response: Response,
     document_id: str,
     profile: str,
@@ -1493,7 +1610,9 @@ async def conformance_verdict_endpoint(
         )
 
     started = time.perf_counter()
-    raw = _blob_store.get(document_id)
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "conformance")
+    raw = _blob_store.get(document_id, tenant=tenant)
     if raw is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1503,7 +1622,7 @@ async def conformance_verdict_endpoint(
             ),
         )
 
-    key = cache_key(raw, {"profile": profile}, kind="conformance")
+    key = cache_key(raw, {"profile": profile}, kind="conformance", tenant=tenant)
     cached = _cache.get(key)
     if cached is not None:
         payload = json.loads(cached)
@@ -1549,10 +1668,19 @@ async def conformance_verdict_endpoint(
     description=(
         "List ``(page_index, dpi, color_space)`` tuples that are already in "
         "the render cache for this PDF, so consumers can skip re-requests. "
-        "Render cache key: ``(pdf_hash, page_index, dpi, color_space)``."
+        "Render cache key: ``(tenant, pdf_hash, page_index, dpi, "
+        "color_space)``. Tenant-scoped via ``X-Codex-Tenant``: another "
+        "tenant's renders are invisible."
     ),
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": "Invalid ``pdf_hash`` (not 64-char hex).",
+        },
+    },
 )
 async def renders_list_endpoint(
+    request: Request,
     response: Response,
     pdf_hash: str,
 ) -> RendersListResponse:
@@ -1562,7 +1690,8 @@ async def renders_list_endpoint(
             detail="pdf_hash must be a lower-case hex SHA-256 (64 chars)",
         )
     started = time.perf_counter()
-    entries = list_renders(_cache, pdf_hash)
+    tenant = _request_tenant(request)
+    entries = list_renders(_cache, pdf_hash, tenant=tenant)
     durations = {"render": int((time.perf_counter() - started) * 1000)}
     for k, v in _stage_durations_header(durations).items():
         response.headers[k] = v
@@ -1587,6 +1716,7 @@ def _looks_like_sha256(value: str) -> bool:
 
 @app.post("/v1/render/page", dependencies=[Depends(authenticate)])
 async def render_page_endpoint(
+    request: Request,
     pdf: UploadFile | None = File(default=None),
     pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
@@ -1596,8 +1726,10 @@ async def render_page_endpoint(
     simulate_overprint: bool = Form(default=True),
 ) -> Response:
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "render_page")
     try:
-        raw, sha = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, sha = await _resolve_pdf_bytes(pdf, pdf_sha256, tenant=tenant)
         on_list = _parse_int_list(ocg_on)
         off_list = _parse_int_list(ocg_off)
         args = {
@@ -1607,7 +1739,7 @@ async def render_page_endpoint(
             "ocg_off": off_list,
             "simulate_overprint": simulate_overprint,
         }
-        key = cache_key(raw, args, kind="page")
+        key = cache_key(raw, args, kind="page", tenant=tenant)
         # The render colour space is currently fixed sRGB for the
         # /v1/render/page endpoint; it's part of the renders-index
         # contract so consumers can disambiguate from separation
@@ -1621,6 +1753,7 @@ async def render_page_endpoint(
                 page_index=page - 1,
                 dpi=dpi,
                 color_space=color_space,
+                tenant=tenant,
             )
             durations = {"render": int((time.perf_counter() - started) * 1000)}
             _record("render_page", 200, time.perf_counter() - started)
@@ -1645,6 +1778,7 @@ async def render_page_endpoint(
             page_index=page - 1,
             dpi=dpi,
             color_space=color_space,
+            tenant=tenant,
         )
         durations = {"render": int((time.perf_counter() - started) * 1000)}
         _record("render_page", 200, time.perf_counter() - started)
@@ -1669,6 +1803,7 @@ async def render_page_endpoint(
 
 @app.post("/v1/render/separations", dependencies=[Depends(authenticate)])
 async def render_separations_endpoint(
+    request: Request,
     pdf: UploadFile | None = File(default=None),
     pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
@@ -1681,10 +1816,12 @@ async def render_separations_endpoint(
     so callers don't have to multiplex multipart/related.
     """
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "render_separations")
     try:
-        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256, tenant=tenant)
         args = {"page": page, "dpi": dpi}
-        key = cache_key(raw, args, kind="separations")
+        key = cache_key(raw, args, kind="separations", tenant=tenant)
         cached = _cache.get(key)
         if cached is not None:
             _record("render_separations", 200, time.perf_counter() - started)
@@ -1720,6 +1857,7 @@ async def render_separations_endpoint(
 
 @app.post("/v1/render/heatmap", dependencies=[Depends(authenticate)])
 async def render_heatmap_endpoint(
+    request: Request,
     pdf: UploadFile | None = File(default=None),
     pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
@@ -1727,10 +1865,12 @@ async def render_heatmap_endpoint(
     tac_limit: float = Form(default=300),
 ) -> Response:
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "render_heatmap")
     try:
-        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256, tenant=tenant)
         args = {"page": page, "dpi": dpi, "tac_limit": tac_limit}
-        key = cache_key(raw, args, kind="heatmap")
+        key = cache_key(raw, args, kind="heatmap", tenant=tenant)
         cached = _cache.get(key)
         if cached is not None:
             _record("render_heatmap", 200, time.perf_counter() - started)
@@ -1763,6 +1903,7 @@ async def render_heatmap_endpoint(
 
 @app.post("/v1/render/layer", dependencies=[Depends(authenticate)])
 async def render_layer_endpoint(
+    request: Request,
     pdf: UploadFile | None = File(default=None),
     pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
@@ -1771,8 +1912,10 @@ async def render_layer_endpoint(
     dpi: int = Form(default=150),
 ) -> Response:
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "render_layer")
     try:
-        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256, tenant=tenant)
         all_idx = _parse_int_list(all_layer_indices)
         args = {
             "page": page,
@@ -1780,7 +1923,7 @@ async def render_layer_endpoint(
             "all_layer_indices": all_idx,
             "dpi": dpi,
         }
-        key = cache_key(raw, args, kind="layer")
+        key = cache_key(raw, args, kind="layer", tenant=tenant)
         cached = _cache.get(key)
         if cached is not None:
             _record("render_layer", 200, time.perf_counter() - started)
@@ -1826,6 +1969,7 @@ async def _read_pdf_field(pdf: UploadFile | None) -> bytes:
 
 @app.post("/v1/sample/color", dependencies=[Depends(authenticate)])
 async def sample_color_endpoint(
+    request: Request,
     pdf: UploadFile | None = File(default=None),
     pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
@@ -1836,14 +1980,16 @@ async def sample_color_endpoint(
     dpi: int = Form(default=300),
 ) -> JSONResponse:
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "sample_color")
     try:
-        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256, tenant=tenant)
         if page_w is None or page_h is None:
             mb = get_page_media_box(raw, page)
             page_w = mb[2] - mb[0]
             page_h = mb[3] - mb[1]
         args = {"page": page, "x": x, "y": y, "page_w": page_w, "page_h": page_h, "dpi": dpi}
-        key = cache_key(raw, args, kind="sample-color")
+        key = cache_key(raw, args, kind="sample-color", tenant=tenant)
         cached = _cache.get(key)
         if cached is not None:
             _record("sample_color", 200, time.perf_counter() - started)
@@ -1867,6 +2013,7 @@ async def sample_color_endpoint(
 
 @app.post("/v1/sample/density", dependencies=[Depends(authenticate)])
 async def sample_density_endpoint(
+    request: Request,
     pdf: UploadFile | None = File(default=None),
     pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
@@ -1878,8 +2025,10 @@ async def sample_density_endpoint(
     tac_limit: float = Form(default=300),
 ) -> JSONResponse:
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "sample_density")
     try:
-        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256, tenant=tenant)
         if page_w is None or page_h is None:
             mb = get_page_media_box(raw, page)
             page_w = mb[2] - mb[0]
@@ -1893,7 +2042,7 @@ async def sample_density_endpoint(
             "dpi": dpi,
             "tac_limit": tac_limit,
         }
-        key = cache_key(raw, args, kind="sample-density")
+        key = cache_key(raw, args, kind="sample-density", tenant=tenant)
         cached = _cache.get(key)
         if cached is not None:
             _record("sample_density", 200, time.perf_counter() - started)
@@ -1943,15 +2092,18 @@ async def walk_type4_endpoint(body: Type4Request) -> Type4Response:
 
 @app.post("/v1/walk/content-stream", dependencies=[Depends(authenticate)])
 async def walk_content_stream_endpoint(
+    request: Request,
     pdf: UploadFile | None = File(default=None),
     pdf_sha256: str | None = Form(default=None),
     page: int = Form(default=1),
 ) -> JSONResponse:
     started = time.perf_counter()
+    tenant = _request_tenant(request)
+    _enforce_rate_limit(tenant, "walk_content_stream")
     try:
-        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256)
+        raw, _ = await _resolve_pdf_bytes(pdf, pdf_sha256, tenant=tenant)
         args = {"page": page}
-        key = cache_key(raw, args, kind="walk-content-stream")
+        key = cache_key(raw, args, kind="walk-content-stream", tenant=tenant)
         cached = _cache.get(key)
         if cached is not None:
             _record("walk_content_stream", 200, time.perf_counter() - started)

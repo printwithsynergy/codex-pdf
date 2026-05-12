@@ -20,8 +20,8 @@ from typing import Any
 from codex_pdf.version import VERSION
 
 
-def _index_key(pdf_hash: str) -> str:
-    return f"codex:{VERSION}:renders-index:{pdf_hash}"
+def _index_key(pdf_hash: str, tenant: str) -> str:
+    return f"codex:{VERSION}:renders-index:{tenant}:{pdf_hash}"
 
 
 def record_render(
@@ -31,12 +31,15 @@ def record_render(
     page_index: int,
     dpi: int,
     color_space: str,
+    tenant: str = "default",
 ) -> None:
     """Add ``(page_index, dpi, color_space)`` to the index for this PDF.
 
     Best-effort: any backend failure is swallowed so a stale index
     can never block a render. ``cache`` must support ``get(key)`` →
-    bytes-or-None and ``set(key, bytes)``.
+    bytes-or-None and ``set(key, bytes)``. The index itself is
+    tenant-scoped so one tenant's render history isn't visible to
+    another even if they share a hash.
     """
     entry = {
         "page_index": page_index,
@@ -44,7 +47,7 @@ def record_render(
         "color_space": color_space,
     }
     try:
-        existing_raw = cache.get(_index_key(pdf_hash))
+        existing_raw = cache.get(_index_key(pdf_hash, tenant))
         if existing_raw is None:
             entries = [entry]
         else:
@@ -59,22 +62,25 @@ def record_render(
                     if entry not in entries:
                         entries.append(entry)
         cache.set(
-            _index_key(pdf_hash),
+            _index_key(pdf_hash, tenant),
             json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8"),
         )
     except Exception:
         pass
 
 
-def list_renders(cache: Any, pdf_hash: str) -> list[dict[str, Any]]:
+def list_renders(
+    cache: Any, pdf_hash: str, *, tenant: str = "default"
+) -> list[dict[str, Any]]:
     """Return the list of cached ``(page_index, dpi, color_space)`` entries.
 
     Returns an empty list if the index is missing, malformed, or the
     cache backend errors. Consumers reading the list should treat
-    unknown ``color_space`` strings as opaque.
+    unknown ``color_space`` strings as opaque. The lookup is tenant-
+    scoped — entries written by another tenant are invisible here.
     """
     try:
-        raw = cache.get(_index_key(pdf_hash))
+        raw = cache.get(_index_key(pdf_hash, tenant))
     except Exception:
         return []
     if raw is None:
