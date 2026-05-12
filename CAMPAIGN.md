@@ -715,3 +715,189 @@ soaks. The remaining post-1.9.0 work (real distributed rate
 limit, generated SDKs in other languages, bulk OpenAPI
 `responses=` cleanup for older endpoints) lives outside the
 campaign — it's regular product work.
+
+---
+
+# Codex AI Signal Campaign
+
+## North Star
+
+Move AI signal extraction (language, logos, regulatory symbols,
+barcodes, document classification, spell candidates, OCR) from
+lint-pdf's `AI_*` rule namespace into codex's data-collection layer.
+Lint becomes pure policy-over-data; every consumer
+(lint / loupe / compile / future) gets the signals for free,
+content-addressed and cached forever.
+
+## Why
+
+Two reasons spelled out in the codex/lint service-boundary doc:
+
+1. **Service boundary.** Codex owns extraction + normalized facts +
+   detection signals. Lint owns rules / workflow / verdicts. Today
+   AI sits on the wrong side of that line — every consumer that
+   wants AI signals pays for its own LLM calls. Moving signal
+   extraction to codex makes them part of the canonical fact set,
+   shared across all consumers.
+2. **Cost.** Codex pays once per `(pdf_hash, signal_kind)`. The
+   second consumer hits the cache. With 50% repeat traffic on the
+   public demo, fleet cost drops by ~half vs every consumer paying
+   independently.
+
+## Design Invariants
+
+Carried over from the unified extraction campaign:
+
+- **Consumer-agnostic surface.** No `lint_*` / `loupe_*` /
+  `compile_*` naming. The signal payload is the same shape every
+  consumer reads.
+- **Two request shapes, both first-class.** First-stop:
+  `/v1/extract` returns the full set inline. Second-stop:
+  `GET /v1/documents/{pdf_hash}/signals/{kind}` for per-resource
+  re-fetch.
+- **Cache keys are part of the contract.**
+  - `language` / `logos` / `symbols` / `barcodes` / `spell`:
+    `(pdf_hash, page_index, kind)`.
+  - `classification`: `(pdf_hash, "classification")`.
+- **Opt-in AI.** Operator gate (`CODEX_AI_ENABLED`); caller gate
+  (`X-Codex-Skip-AI`). Default off so deployments don't accidentally
+  spend on Claude calls. When AI is requested but unavailable, codex
+  emits a structured `CodexWarning` (`ai_disabled` / `ai_skipped` /
+  `ai_signals_pending_impl`) so external apps can render an honest
+  "AI signals not available" state instead of pretending the data
+  was checked.
+- **Detection signals, not verdicts.** `detected_language` says
+  what the language IS, not whether it's ALLOWED. That's lint's
+  job.
+- **Additive only.** No removed or renamed fields across the 1.x
+  schema line.
+
+## Phase Plan
+
+- [x] Phase 0 — Contract freeze (this PR)
+- [ ] Phase 1 — Implementations (Claude-backed extractors)
+- [ ] Phase 1.5 — Cost + latency check; sync-vs-async decision per
+      signal kind
+- [ ] Phase 2 — Operational contract (tenancy isolation for AI
+      cache, per-tenant AI entitlements, rate-limit dimension for
+      AI compute)
+- [ ] Phase 3 — Consumer rollout (lint migrates `AI_*` rules to
+      signal readers; loupe surfaces language / logo badges;
+      compile gates producers on detected dielines)
+- [ ] Phase 4 — Long-tail (model versioning policy, prompt-version
+      header, cost-cap evictions, NSFW / specialised lanes)
+
+## Phase 0 — Contract freeze (this PR)
+
+**Shipped:**
+
+- New model classes: `CodexDetectedLanguage`,
+  `CodexDetectedLogo`, `CodexDetectedSymbol`,
+  `CodexDetectedBarcode`. Plus `SignalKind` literal type.
+- `CodexPage` gains `detected_language`, `detected_logos`,
+  `detected_symbols`, `detected_barcodes`, `spell_candidates`.
+- `CodexDocument` gains `document_classification: dict[str, float]`.
+- Schema bump `1.2.0` → `1.3.0` (additive).
+- New stub endpoint `GET /v1/documents/{pdf_hash}/signals/{kind}`
+  (501 Not Implemented; contract published).
+- New env: `CODEX_AI_ENABLED` (default `false`).
+- New header: `X-Codex-Skip-AI: true|false`.
+- New `CodexWarning` codes: `ai_disabled`, `ai_skipped`,
+  `ai_signals_pending_impl`. Emitted on every `/v1/extract`
+  response so consumers can branch UI on the AI state.
+- 4 new child JSON schemas under `schemas/v1/`. Top-level schema
+  regenerated.
+
+**Deferred:**
+
+- Actual Claude-backed extractors (Phase 1).
+- Tenancy isolation knobs specific to AI cache (Phase 2).
+- Cost cap + circuit breaker patterns from lint-pdf's
+  `ai/legend_claude.py` → codex (Phase 1).
+
+**Decisions owed:**
+
+- Model split per signal kind: Haiku (cheap) vs Sonnet (vision
+  quality). Lint-pdf's pattern: Haiku for OCR, Sonnet for swatch
+  classification. Codex will mostly mirror this — language /
+  spell / classification on Haiku; logos / symbols on Sonnet.
+  Defer the final routing until Phase 1 latency numbers are in.
+
+## Next Phase — Plan (for `next` invocation)
+
+**Phase 1 — Implementations.**
+
+### Two backends from day one
+
+Most self-hosters and the public demo will never have access to a
+GPU. Phase 1 ships **CPU + Claude as the default**; GPU is opt-in
+for SaaS / Enterprise tiers. See `docs/policies.md` >
+"Two AI backends" for the full table.
+
+- **Tier 1 — Default (demo + OSS):** Claude Haiku 4.5 for every
+  signal kind. CPU libraries (`pyzbar`, `pylibdmtx`, perceptual
+  hashing) for the specialised tasks Claude isn't precise about.
+  No GPU dependency. No Modal account required.
+- **Tier 2 — Optional (SaaS / Enterprise):** when
+  `CODEX_AI_GPU_URL` is set, embedding-heavy workloads (font
+  similarity, visual diff, NSFW) route to a self-hosted GPU
+  service. Same cost-cap + circuit-breaker pattern as lint-pdf's
+  GPU client; Claude is the fallback when GPU is unreachable.
+
+The **public demo MUST stay on Tier 1.** That's a hard rule —
+when `CODEX_AI_ENABLED=true` is set on the demo deployment,
+`CODEX_AI_GPU_URL` MUST be unset. Codex emits
+`CodexWarning(code="ai_tier", value="cpu+claude")` in the
+extraction response so consumers can render the running tier
+honestly.
+
+### Extractor modules
+
+- Per signal kind, a thin extractor in `codex_pdf.ai/`:
+  - `language.py` — `detect_language(page_image)` → BCP-47 +
+    confidence. Claude Haiku (cheap; text+small-image input).
+  - `logos.py` — `detect_logos(page_image)` → list of bbox +
+    identity. Claude Sonnet 4.6 (vision quality matters here);
+    Haiku fallback when budget cap is approaching.
+  - `symbols.py` — `detect_symbols(page_image)` → list of bbox +
+    kind from a curated catalogue (GHS, FDA, CE, recycle, …).
+    Claude Sonnet for the visual match; falls back to a curated
+    template-matcher (CPU) when Claude is unavailable.
+  - `barcodes.py` — `decode_barcodes(page_image)` via pyzbar /
+    pylibdmtx. **CPU-only, no AI dep.** Same interface so
+    consumers don't have to special-case.
+  - `classification.py` — `classify_document(pdf_bytes)` →
+    `{category: prob}`. Claude Haiku on first-page render.
+  - `spell.py` — `flag_spell_candidates(text)` → list of unknown
+    words, no dictionary policy. CPU dictionary lookup + optional
+    Claude pass for "is this a word at all" on candidates.
+
+### Cost ceiling
+
+- Same cost-cap + outage-recording pattern as lint-pdf's
+  `ai/legend_claude.py`. Aggressive 1h prompt caching on system
+  prompts + tool schemas — cached input is 10% of normal cost.
+- `CODEX_AI_COST_CAP_USD_PER_REQUEST` (default $0.10) aborts the
+  extraction with `CodexWarning(code="ai_budget_exceeded")` and
+  empty signal fields when projected Claude spend on a single
+  `/v1/extract` would exceed the cap. Guard rail against a 200-page
+  PDF blowing the bill.
+
+### Caching
+
+- Each extractor cached at codex's standard
+  `(tenant, pdf_hash, kind)` key. Second reader hits cache.
+- Cache survives lint / loupe / compile re-reads: the same PDF's
+  signals are extracted once across the entire fleet.
+
+### Instrumentation
+
+- Instrument latency per kind. Numbers feed Phase 1.5
+  (sync-vs-async decision per kind).
+- New Prometheus surface:
+  - `codex_ai_calls_total{kind, model, outcome}` —
+    outcome ∈ `success` / `cap_hit` / `gpu_unavailable` /
+    `claude_error`.
+  - `codex_ai_cost_usd_total{kind, model}` — running sum so cost
+    dashboards stop being a surprise. Reset per deploy.
+

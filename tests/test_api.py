@@ -914,7 +914,8 @@ def test_contract_lists_unified_extraction_endpoints(client: TestClient) -> None
     assert "GET /v1/documents/{pdf_hash}/text-regions" in endpoints
     assert "POST /v1/documents/{document_id}/conformance/{profile}" in endpoints
     assert "GET /v1/documents/{pdf_hash}/renders" in endpoints
-    assert body["schema_version"] == "1.2.0"
+    assert "GET /v1/documents/{pdf_hash}/signals/{kind}" in endpoints
+    assert body["schema_version"] == "1.3.0"
 
 
 def test_openapi_describes_new_endpoints_and_cache_keys(client: TestClient) -> None:
@@ -1109,3 +1110,87 @@ def test_extract_response_is_additive_only(client: TestClient) -> None:
     page = body["pages"][0]
     missing_page = expected_page_fields - set(page.keys())
     assert not missing_page, f"page-level removed/renamed fields: {missing_page}"
+
+
+# ---------------------------------------------------------------------------
+# Codex AI Signal Campaign — Phase 0. Contract surface for AI signal
+# extraction. Endpoints raise NotImplementedError → 501 in Phase 0; tests
+# pin the request validation, opt-in / opt-out semantics, and the
+# extract-response warning emission so consumers can wire bindings ahead
+# of the implementation.
+# ---------------------------------------------------------------------------
+
+
+def test_signals_endpoint_validates_hash(client: TestClient) -> None:
+    resp = client.get("/v1/documents/short/signals/language")
+    assert resp.status_code == 400
+
+
+def test_signals_endpoint_validates_kind(client: TestClient) -> None:
+    resp = client.get(f"/v1/documents/{_ZERO_SHA}/signals/notakind")
+    assert resp.status_code == 400
+
+
+def test_signals_endpoint_phase_0_returns_501(client: TestClient) -> None:
+    resp = client.get(f"/v1/documents/{_ZERO_SHA}/signals/language")
+    assert resp.status_code == 501
+
+
+def test_extract_emits_ai_disabled_warning_by_default(client: TestClient) -> None:
+    """Without ``CODEX_AI_ENABLED=true`` the extract response always
+    carries the ai_disabled warning so consumers know AI signals are
+    empty by design, not by accident."""
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    warnings = resp.json().get("extraction_warnings") or []
+    codes = {w.get("code") for w in warnings if isinstance(w, dict)}
+    assert "ai_disabled" in codes, codes
+
+
+def test_extract_emits_ai_skipped_when_caller_opts_out(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the operator has AI on but the caller sends
+    ``X-Codex-Skip-AI: true``, codex emits ``ai_skipped`` instead of
+    ``ai_disabled``. Consumers branch their UI on the specific code."""
+    monkeypatch.setenv("CODEX_AI_ENABLED", "true")
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+        headers={"X-Codex-Skip-AI": "true"},
+    )
+    assert resp.status_code == 200
+    warnings = resp.json().get("extraction_warnings") or []
+    codes = {w.get("code") for w in warnings if isinstance(w, dict)}
+    assert "ai_skipped" in codes, codes
+    assert "ai_disabled" not in codes
+
+
+def test_extract_emits_pending_impl_when_ai_enabled(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 0 advisory: operator gate is on, caller is in, but the
+    Phase 1 implementation isn't deployed. The warning surfaces that
+    explicitly so consumers don't silently treat empty signals as
+    real."""
+    monkeypatch.setenv("CODEX_AI_ENABLED", "true")
+    pdf_bytes = PDF_PATH.read_bytes()
+    resp = client.post(
+        "/v1/extract",
+        files={"pdf": ("minimal.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    warnings = resp.json().get("extraction_warnings") or []
+    codes = {w.get("code") for w in warnings if isinstance(w, dict)}
+    assert "ai_signals_pending_impl" in codes, codes
+
+
+def test_contract_lists_signals_endpoint(client: TestClient) -> None:
+    resp = client.get("/v1/contract")
+    endpoints = resp.json()["endpoints"]
+    assert "GET /v1/documents/{pdf_hash}/signals/{kind}" in endpoints

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-detected-symbol.schema.json",
+  "title": "CodexDetectedSymbol",
+  "description": "Detected regulatory / safety / packaging symbol. Cache key: (pdf_hash, page_index, \"symbols\"). kind is a stable identifier like \"ghs_flammable\", \"recycle_pet\", \"fda_drug_facts\". Consumers must treat unknown kinds as opaque — the catalogue grows additively.",
+  "type": "object",
+  "required": ["bbox", "kind"],
+  "properties": {
+    "bbox": { "$ref": "codex-box.schema.json" },
+    "kind": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 1.0 },
+    "source": { "type": "string", "default": "unknown" }
+  },
+  "additionalProperties": false
+}

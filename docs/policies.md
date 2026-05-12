@@ -112,3 +112,101 @@ correlate without re-deriving.
 
 See [`slos.md`](./slos.md) for the published latency / availability
 targets and recommended alert thresholds.
+
+## AI signals (1.3.0)
+
+Detection signals derived from AI models (vision, language, document
+classification) live in codex's data layer. They're opt-in for both
+the operator and the caller — and codex always emits a structured
+warning when the signals come back empty so consumers know why.
+
+### Operator switch
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_AI_ENABLED` | `false` | When `true`, codex's AI extractors (language, logos, symbols, classification, spell, OCR) run on every extract. When `false`, all AI signal fields stay empty and codex emits `CodexWarning(code="ai_disabled", scope="signals.ai")` in `extraction_warnings`. |
+
+### Caller switch
+
+`X-Codex-Skip-AI: true` request header opts the caller out of AI
+extraction even when the operator has it on. Same warning shape
+(`code="ai_skipped"`) so consumers can render an honest "AI signals
+not run for this request" state.
+
+### Warning catalogue
+
+| `code` | `scope` | Meaning |
+| --- | --- | --- |
+| `ai_disabled` | `signals.ai` | Operator gate is off. Affects every request. |
+| `ai_skipped` | `signals.ai` | Caller opted out for this request. |
+| `ai_signals_pending_impl` | `signals.ai` | AI is enabled but the Phase 1 implementation isn't deployed yet. Phase 0 advisory only. |
+| `ai_tier` | `signals.ai` | Informational. Emitted on every extract when AI ran; the warning's `message` carries `"cpu+claude"` (Tier 1) or `"gpu"` (Tier 2) so consumers know which backend produced the signals. |
+| `ai_budget_exceeded` | `signals.ai` | The per-request cost cap (`CODEX_AI_COST_CAP_USD_PER_REQUEST`) was hit mid-extract; signal fields are empty even though the operator + caller asked for AI. Combines additively with `ai_tier`. |
+
+Exactly one of `ai_disabled` / `ai_skipped` / `ai_signals_pending_impl` / `ai_tier`
+always lands on every `/v1/extract` response. Consumers MUST NOT branch on the
+absence of these warnings — branch on the presence of the
+specific code instead.
+
+### Cache key contract
+
+Per-resource endpoint: `GET /v1/documents/{pdf_hash}/signals/{kind}`.
+
+| kind | cache key |
+| --- | --- |
+| `language` | `(tenant, pdf_hash, page_index, "language")` |
+| `logos` | `(tenant, pdf_hash, page_index, "logos")` |
+| `symbols` | `(tenant, pdf_hash, page_index, "symbols")` |
+| `barcodes` | `(tenant, pdf_hash, page_index, "barcodes")` |
+| `spell` | `(tenant, pdf_hash, page_index, "spell")` |
+| `classification` | `(tenant, pdf_hash, "classification")` |
+
+Stable across versions. Idempotent: same key → same bytes.
+
+### Forward compatibility
+
+The `SignalKind` enum is intentionally extensible. Future codex
+releases may add `images`, `fonts`, `dieline_detected`, etc.
+Consumers reading signals MUST treat unknown `kind` strings as
+opaque so older clients don't break against newer servers.
+
+### Two AI backends — CPU+Claude vs optional GPU
+
+Most self-hosters and the public demo will never have access to a
+GPU. The AI signal extractors are designed around two backends; the
+default is **CPU+Claude only** so deployments don't accidentally
+spin up GPU bills.
+
+| Tier | When | Backend | Cost shape |
+| --- | --- | --- | --- |
+| **1 — Default / Demo / OSS** | unset / `CODEX_AI_GPU_URL=""` | Claude Haiku 4.5 for text + vision; CPU libs (`pyzbar`, `pylibdmtx`, perceptual hashing) for specialised tasks | Per-call, scales with traffic. Aggressive 1h prompt cache + content-addressed `(tenant, pdf_hash, kind)` cache eliminates repeat cost. |
+| **2 — SaaS / Enterprise (optional)** | `CODEX_AI_GPU_URL=https://...` | Self-hosted GPU service (Modal / RunPod / on-prem) for embedding-heavy workloads (font similarity, visual diff, NSFW); Claude as fallback when GPU is unreachable | Fixed monthly compute + per-call Claude. Justified when fleet traffic exceeds the per-call breakeven point (typically 3-5k jobs/month). |
+
+**Demo deployments MUST stay on Tier 1.** The public demo's
+`lintpdf-default` profile already self-skips analyzers that need a
+GPU when `LINTPDF_GPU_INFERENCE_URL` is unset — codex's AI signal
+extractors mirror that contract with `CODEX_AI_GPU_URL`.
+
+#### Operator knobs (Tier 2 only)
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_AI_GPU_URL` | unset | Optional self-hosted GPU inference URL. When unset, the GPU lane is dormant and every signal kind routes to Claude / CPU lib. |
+| `CODEX_AI_GPU_AUTH_HEADER` | unset | Bearer or shared-secret token sent on every GPU request. |
+| `CODEX_AI_GPU_TIMEOUT_MS` | `15000` | Per-call wall-clock cap before circuit breaker opens. |
+| `CODEX_AI_GPU_DISABLED` | `false` | Hard kill-switch — temporarily route everything to Claude without removing the URL. |
+
+#### Hosted GPU sizing recommendations (when on Tier 2)
+
+- **Modal**: configure `min_containers=0` + `scaledown_window=180`. Idle cost ≈ $0/hour; cold-start ≈ 5-15 s on T4. **Do not set `min_containers > 0` unless your fleet sustains > 1 req/min** — the savings on cold starts evaporate against the idle bill.
+- **RunPod serverless**: `max_workers` tight (≤ 4); per-call billing aligns with traffic.
+- **On-prem / dedicated**: only justified above ~10k AI calls/day.
+
+#### Per-call cost ceiling (Tier 1)
+
+`CODEX_AI_COST_CAP_USD_PER_REQUEST` (default `0.10`): codex aborts
+the extraction with a `CodexWarning(code="ai_budget_exceeded")` and
+empty signal fields when projected Claude spend on a single
+`/v1/extract` exceeds the cap. Same pattern lint-pdf's
+`ai/cost_cap.py` already uses. Acts as a guard rail against
+runaway costs on a single huge PDF.

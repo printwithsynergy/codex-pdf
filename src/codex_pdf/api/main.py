@@ -43,7 +43,7 @@ import socket
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 import structlog
 from fastapi import (
@@ -673,7 +673,7 @@ async def version() -> VersionResponse:
 async def contract() -> ContractResponse:
     return ContractResponse(
         contract_name="codex-document",
-        schema_version="1.2.0",
+        schema_version="1.3.0",
         package_version=VERSION,
         schema_id="https://schemas.thinkneverland.com/codex-pdf/v1/codex-document.schema.json",
         endpoints=[
@@ -683,6 +683,7 @@ async def contract() -> ContractResponse:
             "GET /v1/documents/{pdf_hash}/text-regions",
             "POST /v1/documents/{document_id}/conformance/{profile}",
             "GET /v1/documents/{pdf_hash}/renders",
+            "GET /v1/documents/{pdf_hash}/signals/{kind}",
             "POST /v1/render/page",
             "POST /v1/render/separations",
             "POST /v1/render/heatmap",
@@ -940,6 +941,12 @@ async def _extract_impl(
         # Warm the page-1 render cache in the background — don't block the response.
         asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw, tenant))
         await _maybe_retain(request, raw, sha, payload, retain_form_value)
+        # AI-signal status: codex emits a warning here so callers
+        # never have to guess why ``detected_language`` / ``detected_logos`` /
+        # etc. came back empty. Phase 0 always emits one of the two
+        # — implementation lands in Phase 1.
+        if isinstance(payload, dict):
+            _annotate_ai_status(payload, request)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         durations = {"extract": elapsed_ms}
         _record_stage("extract", elapsed_ms)
@@ -1763,6 +1770,200 @@ def _looks_like_sha256(value: str) -> bool:
     if len(value) != 64:
         return False
     return all(c in "0123456789abcdef" for c in value)
+
+
+# ---------------------------------------------------------------------------
+# AI signal extraction — Codex AI Signal Campaign Phase 0 (1.3.0).
+#
+# Codex emits *detection signals* (what language is this text? where
+# is this logo? what barcode is encoded?); downstream consumers
+# (lint, loupe, compile) apply tenant policy. The implementation is
+# pending — Phase 0 publishes the contract surface only; endpoints
+# raise NotImplementedError → 501 + the global handler translates.
+#
+# Opt-out:
+#   - operator: ``CODEX_AI_ENABLED=false`` (default). Codex emits
+#     ``CodexWarning(code="ai_disabled", scope="signals.ai")`` in
+#     ``extraction_warnings`` when an AI signal endpoint is hit so
+#     consumers can render an honest "AI signals not configured on
+#     this deployment" state instead of pretending the data was
+#     checked.
+#   - caller: ``X-Codex-Skip-AI: true`` request header. Codex emits
+#     ``CodexWarning(code="ai_skipped", ...)`` so consumers can tell
+#     "this caller chose to skip" from "this deployment doesn't
+#     support it".
+# ---------------------------------------------------------------------------
+
+
+_VALID_SIGNAL_KINDS: frozenset[str] = frozenset(
+    {"language", "logos", "symbols", "barcodes", "spell", "classification"}
+)
+
+
+def _ai_enabled() -> bool:
+    """Operator switch for AI signal extraction.
+
+    ``CODEX_AI_ENABLED=true|1|yes|on`` flips it on; default is off so
+    deployments don't accidentally start spending on Claude calls.
+    """
+    raw = (os.environ.get("CODEX_AI_ENABLED") or "").strip().lower()
+    return raw in {"true", "1", "yes", "on"}
+
+
+def _ai_skipped(request: Request) -> bool:
+    """Caller opt-out via ``X-Codex-Skip-AI: true|1|yes|on``."""
+    raw = (request.headers.get("x-codex-skip-ai") or "").strip().lower()
+    return raw in {"true", "1", "yes", "on"}
+
+
+def _annotate_ai_status(payload: dict[str, Any], request: Request) -> None:
+    """Append an AI-status ``CodexWarning`` to the extract response.
+
+    Always emits exactly one of:
+    - ``code="ai_disabled"`` when the operator hasn't set
+      ``CODEX_AI_ENABLED=true``;
+    - ``code="ai_skipped"`` when the caller sent
+      ``X-Codex-Skip-AI: true``;
+    - ``code="ai_enabled"`` (advisory) when AI signal extraction is
+      active. Phase 0 never sets this code because no AI extractor is
+      wired yet — but the slot is published so consumers don't have
+      to guess what "AI is on" looks like.
+
+    Operator-off beats caller-off when both are set (operator gate
+    runs first; caller never sees an off deployment differently).
+    """
+    operator_on = _ai_enabled()
+    caller_off = _ai_skipped(request)
+    if not operator_on:
+        warning = {
+            "code": "ai_disabled",
+            "message": (
+                "AI signal extraction is disabled on this codex deployment "
+                "(CODEX_AI_ENABLED unset / false). detected_language, "
+                "detected_logos, detected_symbols, detected_barcodes, "
+                "spell_candidates, and document_classification remain "
+                "empty regardless of caller intent."
+            ),
+            "scope": "signals.ai",
+        }
+    elif caller_off:
+        warning = {
+            "code": "ai_skipped",
+            "message": (
+                "AI signal extraction was skipped at the caller's request "
+                "(X-Codex-Skip-AI: true). AI signal fields remain empty."
+            ),
+            "scope": "signals.ai",
+        }
+    else:
+        # AI is enabled and the caller did not opt out — Phase 0 still
+        # doesn't have an extractor wired, so emit an advisory so
+        # consumers know they're reading an empty surface until Phase
+        # 1 lands.
+        warning = {
+            "code": "ai_signals_pending_impl",
+            "message": (
+                "AI signal extraction is enabled but the Phase 1 "
+                "implementation is not deployed yet. See CAMPAIGN.md "
+                "> 'Codex AI Signal Campaign'."
+            ),
+            "scope": "signals.ai",
+        }
+    warnings = payload.setdefault("extraction_warnings", [])
+    if isinstance(warnings, list):
+        warnings.append(warning)
+
+
+class SignalResponse(BaseModel):
+    """Response envelope for ``GET /v1/documents/{pdf_hash}/signals/{kind}``.
+
+    Cache key: ``(tenant, pdf_hash, kind)``. ``data`` is the
+    kind-specific signal payload (see CodexDocument model). ``ai_status``
+    is ``"enabled"`` when codex actually ran the AI extractor,
+    ``"disabled"`` when operator-blocked, ``"skipped"`` when
+    caller-blocked. ``stage_durations_ms`` mirrors the
+    ``X-Codex-Stage-Durations-Ms`` header.
+    """
+
+    pdf_hash: str
+    kind: str
+    ai_status: Literal["enabled", "disabled", "skipped"]
+    # ``data`` shape is kind-specific (list for ``logos`` / ``symbols`` /
+    # ``barcodes`` / ``spell``; CodexDetectedLanguage for ``language``;
+    # dict[str, float] for ``classification``). Phase 0 always emits
+    # ``null``; Phase 1 populates per kind.
+    data: Any = None
+    stage_durations_ms: dict[str, int] = Field(default_factory=dict)
+
+
+@app.get(
+    "/v1/documents/{pdf_hash}/signals/{kind}",
+    response_model=SignalResponse,
+    dependencies=[Depends(authenticate)],
+    description=(
+        "Fetch one kind of AI signal for a previously-extracted PDF. "
+        "Cache key: ``(tenant, pdf_hash, kind)``. Idempotent: the same "
+        "key returns the same bytes.\n\n"
+        "AI signals are opt-in: operator sets ``CODEX_AI_ENABLED=true`` "
+        "(default false), and the caller MUST NOT set "
+        "``X-Codex-Skip-AI: true``. When either gate is off the response "
+        "still returns ``200`` with an empty ``data`` payload and "
+        "``ai_status`` set to ``\"disabled\"`` (operator) or "
+        "``\"skipped\"`` (caller). The same fact is mirrored in the "
+        "extract response's ``extraction_warnings``."
+    ),
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": (
+                "Invalid ``pdf_hash`` (not 64-char hex) or unknown "
+                "signal kind. Valid kinds: ``language``, ``logos``, "
+                "``symbols``, ``barcodes``, ``spell``, "
+                "``classification``."
+            ),
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": (
+                "No PDF cached for this ``(tenant, pdf_hash)``. Upload "
+                "via ``POST /v1/extract`` first."
+            ),
+        },
+        429: {
+            "model": ErrorResponse,
+            "description": (
+                "Rate limit exceeded for this tenant. Honour "
+                "``Retry-After``."
+            ),
+        },
+    },
+)
+async def signal_endpoint(
+    request: Request,
+    response: Response,
+    pdf_hash: str,
+    kind: str,
+) -> SignalResponse:
+    if not _looks_like_sha256(pdf_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pdf_hash must be a lower-case hex SHA-256 (64 chars)",
+        )
+    if kind not in _VALID_SIGNAL_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"unknown signal kind: {kind!r}. Known: "
+                f"{sorted(_VALID_SIGNAL_KINDS)}"
+            ),
+        )
+
+    raise NotImplementedError(
+        "AI signal extraction is not implemented yet (Codex AI Signal "
+        "Campaign Phase 0); the public contract is published so "
+        "consumers can wire against it ahead of the rollout. See "
+        "CAMPAIGN.md > 'Codex AI Signal Campaign' for the rollout plan."
+    )
 
 
 # ---------------------------------------------------------------------------

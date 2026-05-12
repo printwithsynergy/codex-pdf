@@ -1,5 +1,73 @@
 # Schema Changelog
 
+## Unreleased
+
+Codex AI Signal Campaign — Phase 0 (contract freeze). Additive
+fields + new per-resource endpoint for AI-derived detection signals
+that move from lint-pdf's `AI_*` rule namespace into codex's
+data-collection layer. Schema bump `1.2.0` → `1.3.0` (additive,
+fully backward compatible).
+
+### New top-level surface
+
+- `CodexPage.detected_language: CodexDetectedLanguage | None` —
+  BCP-47 tag + confidence + source.
+- `CodexPage.detected_logos: list[CodexDetectedLogo]` — bbox +
+  optional canonical identity.
+- `CodexPage.detected_symbols: list[CodexDetectedSymbol]` — bbox +
+  kind (e.g. `ghs_flammable`, `recycle_pet`, `fda_drug_facts`).
+- `CodexPage.detected_barcodes: list[CodexDetectedBarcode]` —
+  bbox + format + decoded value.
+- `CodexPage.spell_candidates: list[str]` — unknown-word list, no
+  tenant dictionary policy.
+- `CodexDocument.document_classification: dict[str, float]` —
+  per-category probabilities (`prescription_drug`, `folding_carton`,
+  `sign`, `proof`, …).
+
+All default to empty / null until the operator enables AI via
+`CODEX_AI_ENABLED=true` and the caller does **not** opt out via
+`X-Codex-Skip-AI: true`.
+
+### New endpoint (stub in this release)
+
+- `GET /v1/documents/{pdf_hash}/signals/{kind}` —
+  per-resource second-stop fetch. Cache key:
+  `(tenant, pdf_hash, kind)`. Valid kinds: `language`, `logos`,
+  `symbols`, `barcodes`, `spell`, `classification`.
+- Raises `NotImplementedError` → `501 Not Implemented` in this
+  release. Phase 1 fills the body.
+
+### Operator + caller opt-out
+
+| Surface | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_AI_ENABLED` env | `false` | Operator switch. When unset / false, AI extraction never runs. |
+| `X-Codex-Skip-AI` header | absent | Caller switch. When `true`, AI extraction is skipped for this request even if the operator has it on. |
+
+### CodexWarning codes
+
+`POST /v1/extract` now emits exactly one of these warnings in
+`extraction_warnings` so consumers can render an honest "AI signals
+not available" state instead of guessing:
+
+| `code` | `scope` | Meaning |
+| --- | --- | --- |
+| `ai_disabled` | `signals.ai` | Operator hasn't set `CODEX_AI_ENABLED=true`. AI fields remain empty regardless of caller intent. |
+| `ai_skipped` | `signals.ai` | Caller sent `X-Codex-Skip-AI: true`. AI fields remain empty. |
+| `ai_signals_pending_impl` | `signals.ai` | AI is enabled and caller did not opt out, but the Phase 1 implementation is not deployed yet. Phase 0 always sets this. |
+
+### Cache-key contract additions
+
+- `language`:       `(pdf_hash, page_index, "language")`
+- `logos`:          `(pdf_hash, page_index, "logos")`
+- `symbols`:        `(pdf_hash, page_index, "symbols")`
+- `barcodes`:       `(pdf_hash, page_index, "barcodes")`
+- `spell`:          `(pdf_hash, page_index, "spell")`
+- `classification`: `(pdf_hash, "classification")`
+
+Stable across versions; documented inline on the OpenAPI
+description for `/v1/documents/{pdf_hash}/signals/{kind}`.
+
 ## 1.9.0 — 2026-05-12
 
 Final cut of the unified extraction campaign. All four planned

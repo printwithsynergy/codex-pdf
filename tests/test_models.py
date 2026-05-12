@@ -14,7 +14,7 @@ def test_document_minimum_shape() -> None:
         ],
     )
     payload = doc.model_dump(mode="json")
-    assert payload["schema_version"] == "1.2.0"
+    assert payload["schema_version"] == "1.3.0"
     assert payload["pages"][0]["page_num"] == 1
     # New additive fields default to empty/zero.
     assert payload["conformance_verdicts"] == {}

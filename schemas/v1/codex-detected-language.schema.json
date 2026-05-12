@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.thinkneverland.com/codex-pdf/v1/codex-detected-language.schema.json",
+  "title": "CodexDetectedLanguage",
+  "description": "Detected dominant language on a page. Cache key: (pdf_hash, page_index, \"language\"). Emitted only when CODEX_AI_ENABLED=true and X-Codex-Skip-AI was not set.",
+  "type": "object",
+  "required": ["code"],
+  "properties": {
+    "code": { "type": "string", "description": "BCP-47 tag (en, en-US, fr, zh-Hans, ...)" },
+    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 1.0 },
+    "source": { "type": "string", "default": "unknown" }
+  },
+  "additionalProperties": false
+}
