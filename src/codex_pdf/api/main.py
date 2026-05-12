@@ -123,7 +123,12 @@ from codex_pdf.render.separations import (
     sample_color,
     sample_density,
 )
-from codex_pdf.ai import build_context, run_signal, run_signals_on_document
+from codex_pdf.ai import (
+    AI_MODEL_VERSIONS,
+    build_context,
+    run_signal,
+    run_signals_on_document,
+)
 from codex_pdf.schema import codex_document_schema, load_published_schema
 from codex_pdf.version import VERSION
 
@@ -169,12 +174,24 @@ try:
         "Codex API per-stage latency",
         ["stage"],
     )
+    # Phase 4 (AI Signal Campaign): per-kind AI extractor outcomes.
+    # ``status`` is one of ``ok`` (signal populated), ``empty`` (extractor
+    # returned no findings), ``budget_exceeded`` (cost cap stopped the
+    # call), ``error`` (extractor raised). Operators chart this to spot
+    # silent prompt drift or rising error rates after a Claude model
+    # rollover.
+    AI_CALLS = Counter(
+        "codex_ai_signal_calls_total",
+        "Codex AI signal extractor invocations",
+        ["kind", "model", "status"],
+    )
     _HAS_PROMETHEUS = True
 except ImportError:  # pragma: no cover
     REQUESTS = None
     LATENCY = None
     CACHE_LOOKUPS = None
     STAGE_LATENCY = None
+    AI_CALLS = None
     CONTENT_TYPE_LATEST = "text/plain"  # type: ignore
     _HAS_PROMETHEUS = False
 
@@ -381,6 +398,10 @@ class ContractResponse(BaseModel):
     schema_id: str
     endpoints: list[str]
     section_schema_versions: dict[str, str] = Field(default_factory=dict)
+    # Phase 4: per-extractor model + prompt + payload-schema versions
+    # so SDK consumers can pin against the exact model that produced
+    # a given signal kind. Map shape: ``{kind: {model, prompt, schema}}``.
+    ai_model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 # Color request/response models. Each field is optional; the resolver
@@ -713,6 +734,7 @@ async def contract() -> ContractResponse:
             "color": COLOR_SCHEMA_VERSION,
             "geom": GEOM_SCHEMA_VERSION,
         },
+        ai_model_versions=AI_MODEL_VERSIONS,
     )
 
 
@@ -961,6 +983,20 @@ async def _extract_impl(
                     )
 
                 extra_ai_warnings = await loop.run_in_executor(None, _run_ai)
+                # Phase 4: increment per-kind metric for each signal
+                # the extract lane attempted. Budget-exceeded kinds
+                # come back as warnings; everything else counts as ok.
+                if AI_CALLS is not None:
+                    budgeted_out = {
+                        (w.get("scope") or "").split(".", 1)[-1]
+                        for w in extra_ai_warnings
+                        if isinstance(w, dict) and w.get("code") == "ai_budget_exceeded"
+                    }
+                    for kind, versions in AI_MODEL_VERSIONS.items():
+                        status_label = "budget_exceeded" if kind in budgeted_out else "ok"
+                        AI_CALLS.labels(
+                            kind=kind, model=versions.get("model", "?"), status=status_label
+                        ).inc()
             _annotate_ai_status(
                 payload,
                 request,
