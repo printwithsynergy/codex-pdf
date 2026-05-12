@@ -151,10 +151,29 @@ try:
         "Codex API request latency",
         ["endpoint"],
     )
+    # Cache hit/miss telemetry — drives Phase 3's "cache hit rate per
+    # endpoint" surface. Counters are labeled per endpoint so operators
+    # can split warm-vs-cold traffic without joining other series.
+    CACHE_LOOKUPS = Counter(
+        "codex_api_cache_lookups_total",
+        "Cache lookups by endpoint and outcome",
+        ["endpoint", "outcome"],
+    )
+    # Per-stage duration in seconds — mirrors the
+    # stage_durations_ms / X-Codex-Stage-Durations-Ms surface so the
+    # same numbers consumers see on the response are observable in
+    # Prometheus without scraping logs.
+    STAGE_LATENCY = Histogram(
+        "codex_api_stage_seconds",
+        "Codex API per-stage latency",
+        ["stage"],
+    )
     _HAS_PROMETHEUS = True
 except ImportError:  # pragma: no cover
     REQUESTS = None
     LATENCY = None
+    CACHE_LOOKUPS = None
+    STAGE_LATENCY = None
     CONTENT_TYPE_LATEST = "text/plain"  # type: ignore
     _HAS_PROMETHEUS = False
 
@@ -164,6 +183,31 @@ def _record(endpoint: str, status_code: int, duration: float) -> None:
         return
     REQUESTS.labels(endpoint=endpoint, status=str(status_code)).inc()
     LATENCY.labels(endpoint=endpoint).observe(duration)
+
+
+def _record_cache(endpoint: str, *, hit: bool) -> None:
+    """Increment the cache hit/miss counter for ``endpoint``.
+
+    No-op when prometheus_client isn't installed. Called from
+    every cache-aware endpoint right after the ``_cache.get`` so the
+    outcome reflects the real-world cache-warming pattern.
+    """
+    if not _HAS_PROMETHEUS or CACHE_LOOKUPS is None:
+        return
+    CACHE_LOOKUPS.labels(endpoint=endpoint, outcome="hit" if hit else "miss").inc()
+
+
+def _record_stage(stage: str, duration_ms: int) -> None:
+    """Observe a per-stage duration in the Prometheus histogram.
+
+    ``duration_ms`` matches the value emitted on the response
+    envelope so external observers can correlate the two surfaces.
+    Stage names are opaque on the consumer side; operators add
+    Grafana panels by stage as needed.
+    """
+    if not _HAS_PROMETHEUS or STAGE_LATENCY is None:
+        return
+    STAGE_LATENCY.labels(stage=stage).observe(duration_ms / 1000.0)
 
 
 # ---------------------------------------------------------------------------
@@ -898,6 +942,7 @@ async def _extract_impl(
         await _maybe_retain(request, raw, sha, payload, retain_form_value)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         durations = {"extract": elapsed_ms}
+        _record_stage("extract", elapsed_ms)
         if isinstance(payload, dict):
             existing = payload.get("stage_durations_ms")
             if isinstance(existing, dict):
@@ -1513,9 +1558,12 @@ async def text_regions_endpoint(
         raw, {"page_index": page_index, "dpi": dpi}, kind="text-regions", tenant=tenant
     )
     cached = _cache.get(key)
+    _record_cache("text_regions", hit=cached is not None)
     if cached is not None:
         payload = json.loads(cached)
-        durations = {"text_regions": int((time.perf_counter() - started) * 1000)}
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        durations = {"text_regions": elapsed_ms}
+        _record_stage("text_regions", elapsed_ms)
         payload["stage_durations_ms"] = durations
         for k, v in _stage_durations_header(durations).items():
             response.headers[k] = v
@@ -1543,7 +1591,9 @@ async def text_regions_endpoint(
         "stage_durations_ms": {},
     }
     _cache.set(key, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-    durations = {"text_regions": int((time.perf_counter() - started) * 1000)}
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    durations = {"text_regions": elapsed_ms}
+    _record_stage("text_regions", elapsed_ms)
     payload["stage_durations_ms"] = durations
     for k, v in _stage_durations_header(durations).items():
         response.headers[k] = v
@@ -1624,9 +1674,12 @@ async def conformance_verdict_endpoint(
 
     key = cache_key(raw, {"profile": profile}, kind="conformance", tenant=tenant)
     cached = _cache.get(key)
+    _record_cache("conformance", hit=cached is not None)
     if cached is not None:
         payload = json.loads(cached)
-        durations = {"conformance": int((time.perf_counter() - started) * 1000)}
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        durations = {"conformance": elapsed_ms}
+        _record_stage("conformance", elapsed_ms)
         payload["stage_durations_ms"] = durations
         for k, v in _stage_durations_header(durations).items():
             response.headers[k] = v
@@ -1653,7 +1706,9 @@ async def conformance_verdict_endpoint(
         "stage_durations_ms": {},
     }
     _cache.set(key, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-    durations = {"conformance": int((time.perf_counter() - started) * 1000)}
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    durations = {"conformance": elapsed_ms}
+    _record_stage("conformance", elapsed_ms)
     payload["stage_durations_ms"] = durations
     for k, v in _stage_durations_header(durations).items():
         response.headers[k] = v
@@ -1692,6 +1747,7 @@ async def renders_list_endpoint(
     started = time.perf_counter()
     tenant = _request_tenant(request)
     entries = list_renders(_cache, pdf_hash, tenant=tenant)
+    _record_cache("renders_list", hit=bool(entries))
     durations = {"render": int((time.perf_counter() - started) * 1000)}
     for k, v in _stage_durations_header(durations).items():
         response.headers[k] = v

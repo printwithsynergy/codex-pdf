@@ -41,6 +41,13 @@ export interface CodexClientOptions {
   bearerToken?: string;
   apiKey?: string;
   internalToken?: string;
+  /**
+   * Optional tenant identifier. Surfaces on every request as the
+   * `X-Codex-Tenant` header so a multi-tenant codex deployment
+   * scopes cache + blob store by caller. Server normalises invalid
+   * values to `"default"`. Reads `CODEX_TENANT` env when omitted.
+   */
+  tenant?: string;
   /** Request timeout in milliseconds. Default 60000. */
   timeoutMs?: number;
   /** Number of retry attempts on transient failures. Default 3. */
@@ -557,6 +564,7 @@ export class HttpClient {
   readonly bearerToken?: string;
   readonly apiKey?: string;
   readonly internalToken?: string;
+  readonly tenant?: string;
   readonly timeoutMs: number;
   readonly maxRetries: number;
   private readonly fetchImpl: typeof fetch;
@@ -583,6 +591,7 @@ export class HttpClient {
     this.bearerToken = opts.bearerToken ?? envVar("CODEX_BEARER_TOKEN");
     this.apiKey = opts.apiKey ?? envVar("CODEX_API_KEY");
     this.internalToken = opts.internalToken ?? envVar("CODEX_INTERNAL_TOKEN");
+    this.tenant = opts.tenant ?? envVar("CODEX_TENANT") ?? undefined;
     const envTimeout = envVar("CODEX_TIMEOUT_MS");
     this.timeoutMs =
       opts.timeoutMs ?? (envTimeout ? Number.parseInt(envTimeout, 10) : DEFAULT_TIMEOUT_MS);
@@ -611,6 +620,7 @@ export class HttpClient {
     if (this.affinityKey) out["X-Codex-Affinity-Key"] = this.affinityKey;
     const effectivePlant = this.plant ?? target?.plant;
     if (effectivePlant) out["X-Codex-Plant"] = effectivePlant;
+    if (this.tenant) out["X-Codex-Tenant"] = this.tenant;
     return { ...out, ...extra };
   }
 
@@ -647,7 +657,20 @@ export class HttpClient {
             lastErr = new CodexClientError(`codex ${path} -> ${res.status}`, {
               status: res.status,
             });
-            await new Promise((r) => setTimeout(r, Math.min(2 ** attempt * 1000, 8000)));
+            // 429 carries Retry-After (seconds); honour it over the
+            // exponential backoff so the server's quota math drives
+            // the wait.
+            let waitMs = Math.min(2 ** attempt * 1000, 8000);
+            if (res.status === 429) {
+              const retryAfter = res.headers.get("Retry-After");
+              if (retryAfter) {
+                const seconds = Number.parseFloat(retryAfter);
+                if (Number.isFinite(seconds) && seconds >= 0) {
+                  waitMs = Math.min(seconds * 1000, 60_000);
+                }
+              }
+            }
+            await new Promise((r) => setTimeout(r, waitMs));
             continue;
           }
           const text = await res.text().catch(() => "");

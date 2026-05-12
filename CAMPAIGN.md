@@ -47,7 +47,7 @@ Draft PRs only.
   inline; see Phase 1 log_
 - [x] Phase 2 — Operational contract (errors, tenancy, rate
   limits, parity) — PR #19 (merged `d79cbad`), rc.2 cut _pending_
-- [ ] Phase 3 — Consumer rollout + observability
+- [x] Phase 3 — Consumer rollout + observability — PR _pending_
 - [ ] Phase 4 — Long-tail (versioning, eviction, SLOs)
 - [ ] Synthesis — Emit consumer + marketing prompts
 
@@ -309,19 +309,88 @@ implementations stabilise. Phase 2 is now the right moment — rc.2
 (or 1.9.0 final) makes the operational contract concrete for
 consumers to wire against.
 
+### Phase 3 — 2026-05-12 — PR _pending_
+
+**Shipped:**
+- **Python client tenant + Phase 1 surface.** ``HttpClient``
+  constructor gained a ``tenant`` keyword (env fallback
+  ``CODEX_TENANT``) and surfaces it as ``X-Codex-Tenant`` on every
+  request. Three new methods: ``text_regions(pdf_hash, ...)``,
+  ``conformance(document_id, profile)``, ``list_renders(pdf_hash)``.
+  ``extract()`` back-fills ``stage_durations_ms`` from the
+  ``X-Codex-Stage-Durations-Ms`` header when the envelope omits
+  it. 429 handling now honours ``Retry-After`` over the
+  exponential backoff.
+- **TS client tenant.** ``CodexClientOptions.tenant`` (env
+  fallback ``CODEX_TENANT``) threaded through ``headers()``; 429
+  retry honours ``Retry-After``. Existing Phase 1 methods
+  (``getTextRegions`` / ``computeConformance`` / ``listRenders``)
+  added in rc.0 are unchanged — they already use the same
+  request path.
+- **Cache-key stability test.** Subprocess-based test asserts
+  ``cache_key`` is a pure function of its inputs — same inputs in
+  a fresh Python process yield the same key bytes. Catches
+  accidental dependence on module-level state.
+- **Cache hit/miss + stage observability.** New Prometheus
+  surfaces:
+  - ``codex_api_cache_lookups_total{endpoint, outcome=hit|miss}``
+  - ``codex_api_stage_seconds{stage}``
+  Both Phase 1 endpoints (`text_regions`, `conformance`),
+  `/v1/extract`, and the renders index emit these. The stage
+  histogram mirrors `stage_durations_ms` for Grafana parity with
+  the consumer-visible numbers.
+- **Integration guide.** ``docs/unified-extraction.md`` covers
+  endpoints, cache-key contract, tenancy, rate limiting, error
+  shapes, stage telemetry, observability, conformance profiles,
+  and an end-to-end Python + TS example. Single source consumers
+  can paste into their wiki.
+
+**Deferred:**
+- Bulk OpenAPI ``responses=`` cleanup for older endpoints. Their
+  shape is already ``ErrorResponse``-compatible (FastAPI
+  ``HTTPException``) but the OpenAPI doc still lists generic
+  defaults. Defer to Phase 4 cleanup.
+- Generated SDKs from OpenAPI (e.g. Go, Ruby). Hand-rolled Python
+  + TS already cover the two named consumers; spin up a generated
+  SDK lane only if a new consumer arrives in a different
+  language.
+- Cache hit-rate dashboards. The metrics ship; Grafana JSON is
+  operator-owned and lives outside this repo.
+
+**Learned:**
+- The bundled clients had drifted from the server contract: the
+  Python client predated tenant scoping by months and the TS
+  client never had it. Lockstep bumps with the server keep this
+  drift visible in CI.
+- Cache hit/miss counters at the per-endpoint level cost ~zero
+  (prometheus-client is in-process) and make the
+  "is the cache earning its keep?" question answerable from a
+  single dashboard panel. Worth doing in Phase 1; we delayed it
+  to Phase 3 to keep PR diffs narrow.
+
+**Decisions owed:** _none_.
+
 ## Next Phase — Plan (for `next` invocation)
 
-**Phase 3 — Consumer rollout + observability.**
+**Phase 4 — Long-tail.**
 
-- Generate + publish typed clients (Python at minimum; TS is
-  already on the registry — bump for the Phase 2 surface).
-- Cache-key stability test across restarts (proves keys survive
-  process boundaries).
-- Structured logs + metrics: cache hit rate per endpoint,
-  p50/p95 per stage.
-- Consumer-facing "how to integrate" doc in ``docs/``.
+- ``ConformanceProfile`` enum versioning policy. Document how
+  consumers handle unknown profile keys (already the contract;
+  formalise the SLA).
+- Cache eviction / TTL policy. Today the cache backends (memory
+  LRU; Redis SETEX) have their own TTLs; centralise the policy
+  knob.
+- Backpressure on conformance compute queue. Currently the rate
+  limiter sheds excess load; we may want a 503 with backpressure
+  semantics for downstream fairness.
+- SLOs published. Define + publish p95 latency + availability
+  SLOs per endpoint; wire alerts.
 
-Phase 3 has no blockers — Phase 2's operational contract is
-self-contained and consumer-agnostic. Start with the typed-client
-bump so consumers (lint-pdf, future loupe-pdf / compile-pdf) see
-the tenant + rate-limit surface in their generated bindings.
+No blockers. Phase 3 is complete: consumers can wire against a
+documented surface today using `1.9.0-rc.3` (cut after this PR
+merges) or the eventual `1.9.0` final.
+
+**Synthesis is now eligible.** With Phase 3 complete, the
+playbook's `synthesize` invocation can run to emit wave-ordered
+consumer + marketing-site prompts. Synthesis was deferred until
+"impls stabilise"; they have.

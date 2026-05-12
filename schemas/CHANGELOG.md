@@ -1,5 +1,50 @@
 # Schema Changelog
 
+## Unreleased
+
+Phase 3 of the unified extraction campaign — consumer rollout +
+observability. No new endpoints; this release brings the bundled
+clients up to the server contract and adds the metrics consumers
+need to wire dashboards.
+
+### Bundled clients now ship the Phase 1/2 surface
+
+- **Python** (`codex_pdf.client.HttpClient`): `tenant` constructor
+  keyword + `CODEX_TENANT` env, surfaces as `X-Codex-Tenant`
+  on every request. New methods `text_regions`, `conformance`,
+  `list_renders` for the per-resource endpoints. `extract()`
+  back-fills `stage_durations_ms` from the
+  `X-Codex-Stage-Durations-Ms` header. 429 retries honour
+  `Retry-After` over the exponential backoff.
+- **TypeScript** (`@printwithsynergy/codex-client`):
+  `CodexClientOptions.tenant` + env fallback; same header. 429
+  retries honour `Retry-After`. Phase 1 methods
+  (`getTextRegions`, `computeConformance`, `listRenders`) already
+  shipped in rc.0.
+
+### Cache hit-rate + per-stage observability
+
+New Prometheus surfaces on `/metrics`:
+
+- `codex_api_cache_lookups_total{endpoint, outcome=hit|miss}` —
+  cache hit rate per endpoint.
+- `codex_api_stage_seconds{stage}` — mirrors `stage_durations_ms`
+  so Grafana panels can use the same numbers consumers see in
+  responses.
+
+### Cache-key stability test
+
+Subprocess-based test asserts `cache_key()` is a pure function of
+its inputs — same inputs in a fresh Python process yield the same
+key bytes. Catches accidental dependence on module-level state.
+
+### Integration guide
+
+`docs/unified-extraction.md` documents the endpoints, cache-key
+contract, tenancy, rate limiting, error shapes, stage telemetry,
+observability, conformance profiles, and end-to-end Python + TS
+examples. Single source consumers can paste into their wiki.
+
 ## 1.9.0-rc.2 — 2026-05-12
 
 Phase 2 of the unified extraction campaign — operational contract
