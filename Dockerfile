@@ -38,7 +38,7 @@ COPY src ./src
 COPY schemas ./schemas
 COPY tests ./tests
 
-RUN uv sync --frozen --no-dev --extra redis --extra geom --extra retain
+RUN uv sync --frozen --no-dev --extra redis --extra geom --extra retain --extra ai --extra vision
 
 
 FROM python:3.12-slim AS base
