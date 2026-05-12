@@ -1,5 +1,28 @@
 """Package version.
 
+1.12.0 (minor): AI Signal Campaign — Phase 1.5 lands the codex-
+vision-sidecar. A new :mod:`codex_pdf.vision` package ships a
+FastAPI service (``python -m codex_pdf.vision``) plus the HTTP
+client (``codex_pdf.vision.client``) the main API uses to call it.
+First extractor is **perceptual hashing** (CPU-pure, no ONNX
+required); subsequent 1.x releases add NudeNet + CLIP without
+shape changes to this contract.
+
+The vision sidecar is **optional**. When ``CODEX_VISION_URL`` is
+unset on the main API service codex degrades gracefully (vision-
+sourced signal kinds stay empty + a ``vision_unavailable`` warning
+lands on the response).
+
+New optional extra: ``codex-pdf[vision]`` adds ``imagehash`` +
+``Pillow`` for the sidecar service. The main API only needs
+``httpx`` (now in base deps) to call into it.
+
+Deploy: ``railway.vision.toml`` ships the start command +
+restart-policy + scale-to-zero defaults. Provision as a second
+service in the same Railway project as
+``codex-pdf-<host>-sidecar``; set ``CODEX_VISION_URL`` on the main
+service to its private-network URL.
+
 1.11.0 (minor): AI Signal Campaign — Phase 1 implementation lands.
 The six extractors frozen by 1.10.0's contract are now wired:
 
@@ -80,5 +103,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 __version__ = VERSION

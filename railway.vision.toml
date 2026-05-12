@@ -1,0 +1,47 @@
+# codex-vision-sidecar — Railway service config.
+#
+# Same Docker image as codex-pdf API (so version skew is impossible);
+# only the start command differs. Hosts the CPU vision extractors
+# (perceptual hash today; ONNX-backed extractors land in subsequent
+# 1.x releases without shape changes to this contract).
+#
+# Provision as a second service in the same Railway project alongside
+# codex-pdf-<host>-sidecar. Optional: omit entirely and codex degrades
+# gracefully (vision-sourced signal fields stay empty + a
+# vision_unavailable warning lands on the response).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python -m codex_pdf.vision"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+numReplicas = 1
+sleepApplication = true
+
+# Required env vars (set per environment in the Railway dashboard or
+# via the GraphQL variableUpsert mutation):
+#
+#   PORT                    Railway-assigned; uvicorn binds 0.0.0.0:$PORT
+#
+# Optional:
+#
+#   CODEX_INTERNAL_TOKEN    Shared secret with the main codex-pdf API
+#                           so only it can call the sidecar. When
+#                           unset the sidecar has no auth gate
+#                           (matches codex-pdf's smoke-test default).
+#   CODEX_LOG_LEVEL         defaults to INFO.
+#
+# The main codex-pdf service reads ``CODEX_VISION_URL`` on every
+# request; set it to the Railway private network URL of this service
+# (``https://codex-vision-<host>-sidecar.railway.internal``).
+#
+# Operational notes:
+#   - Idle-scale-to-zero is on (``sleepApplication = true``). Cold-
+#     start is ~3s for the FastAPI process; the main API absorbs
+#     this via its ``_TIMEOUT_S`` of 8s.
+#   - Each replica is purely stateless; horizontal scale is safe.
+#   - One replica is enough for most volumes; bump only when the
+#     main service's vision_unavailable warning rate exceeds 1%.

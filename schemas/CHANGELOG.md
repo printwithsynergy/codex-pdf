@@ -1,5 +1,44 @@
 # Schema Changelog
 
+## 1.12.0 — 2026-05-12
+
+Codex AI Signal Campaign — Phase 1.5 (codex-vision-sidecar). New
+service surface for CPU-only computer-vision extractors that
+complement Phase 1's Claude-backed lane. **Schema unchanged at
+1.3.0**; this release adds infrastructure, not contract.
+
+### New service surface
+
+- New package `codex_pdf.vision/` with `app.py` (FastAPI service),
+  `phash.py` (perceptual hashing, no ML model file), and
+  `client.py` (HTTP client the main API uses to call into the
+  sidecar).
+- New entrypoint `python -m codex_pdf.vision` for the sidecar
+  service.
+- New Railway config `railway.vision.toml` — same docker image as
+  the main codex-pdf service, only the start command differs.
+- New independent contract version constant
+  `codex_pdf.vision.VISION_SCHEMA_VERSION = "1.0.0"`.
+
+### New endpoints (on the vision sidecar service, NOT on the main API)
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /healthz` | Liveness + extractor inventory. |
+| `GET /v1/contract` | Endpoint inventory + schema versions. |
+| `POST /v1/vision/phash` | Multipart PNG → 64-bit pHash hex. |
+
+### New env vars
+
+| Env | Default | Where | Meaning |
+| --- | --- | --- | --- |
+| `CODEX_VISION_URL` | unset | main API | Vision sidecar private-network URL. Unset → vision lane dormant. |
+| `CODEX_INTERNAL_TOKEN` | unset | both | Shared secret; sidecar enforces it when set. |
+
+### New optional extra
+
+- `pip install "codex-pdf[vision]"` adds `imagehash` + `Pillow`.
+
 ## 1.11.0 — 2026-05-12
 
 Codex AI Signal Campaign — Phase 1 (implementation lands). The six
