@@ -140,6 +140,7 @@ class HttpClient:
         bearer_token: str | None = None,
         api_key: str | None = None,
         internal_token: str | None = None,
+        tenant: str | None = None,
         timeout_ms: int | None = None,
         max_retries: int = 3,
         local_fallback: bool | None = None,
@@ -161,6 +162,11 @@ class HttpClient:
         self.bearer_token = bearer_token or os.environ.get("CODEX_BEARER_TOKEN")
         self.api_key = api_key or os.environ.get("CODEX_API_KEY")
         self.internal_token = internal_token or os.environ.get("CODEX_INTERNAL_TOKEN")
+        # Tenant flows through X-Codex-Tenant on every request so a
+        # multi-tenant codex deployment scopes the cache + blob store
+        # by caller. Defaults to env CODEX_TENANT, else server-side
+        # "default" via the X-Codex-Tenant absence.
+        self.tenant = (tenant or os.environ.get("CODEX_TENANT") or "").strip() or None
         env_timeout = os.environ.get("CODEX_TIMEOUT_MS")
         timeout_value = timeout_ms if timeout_ms is not None else (
             int(env_timeout) if env_timeout else 60000
@@ -216,6 +222,8 @@ class HttpClient:
         effective_plant = self.plant or (target.plant if target else None)
         if effective_plant:
             headers["X-Codex-Plant"] = effective_plant
+        if self.tenant:
+            headers["X-Codex-Tenant"] = self.tenant
         if extra:
             headers.update(extra)
         return headers
@@ -252,7 +260,18 @@ class HttpClient:
                 except urlerror.HTTPError as exc:
                     if exc.code in {408, 429} or 500 <= exc.code < 600:
                         last_exc = exc
-                        backoff = min(2.0 ** attempt, 8.0)
+                        # 429 carries Retry-After (seconds); honour it
+                        # over the exponential backoff so the server's
+                        # quota math drives the wait.
+                        if exc.code == 429:
+                            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                            try:
+                                backoff = max(0.0, float(retry_after)) if retry_after else 1.0
+                            except (TypeError, ValueError):
+                                backoff = 1.0
+                            backoff = min(backoff, 60.0)
+                        else:
+                            backoff = min(2.0 ** attempt, 8.0)
                         logger.warning(
                             "codex %s -> %d on %s, retry %d in %.1fs",
                             path,
@@ -541,11 +560,101 @@ class HttpClient:
                     pass
 
         body, boundary = _build_multipart(raw)
-        _status, response_body, _headers = self._post(
+        _status, response_body, headers = self._post(
             "/v1/extract",
             body=body,
             content_type=f"multipart/form-data; boundary={boundary}",
             accept="application/json",
+        )
+        payload = json.loads(response_body)
+        # Server emits stage_durations_ms both on the envelope and on
+        # the X-Codex-Stage-Durations-Ms header. Backfill from the
+        # header if a transport stripped the envelope key.
+        if isinstance(payload, dict) and "stage_durations_ms" not in payload:
+            header_value = headers.get("X-Codex-Stage-Durations-Ms") or headers.get(
+                "x-codex-stage-durations-ms"
+            )
+            if header_value:
+                try:
+                    payload["stage_durations_ms"] = json.loads(header_value)
+                except json.JSONDecodeError:
+                    pass
+        return payload
+
+    # ------------------ unified extraction (Phase 1) ------------------
+
+    def text_regions(
+        self,
+        pdf_hash: str,
+        *,
+        page_index: int = 0,
+        dpi: int = 150,
+    ) -> dict[str, Any]:
+        """Fetch cached text regions for one page of a previously-
+        extracted PDF. Cache key: ``(pdf_hash, page_index, dpi)``.
+
+        Returns the parsed JSON envelope unchanged. Geometry is in PDF
+        user-space points. Raises :class:`CodexClientError` with
+        ``status=404`` when the document isn't in cache.
+        """
+        self._require_http_or_local()
+        if not self.is_http:
+            from codex_pdf.extract.text_regions import extract_text_regions_for_page
+
+            # Local fallback can't honour the cache key (no blob store),
+            # so it operates on raw bytes when callers supply them via
+            # ``extract()`` first. The hash-only path needs an HTTP
+            # target.
+            raise CodexClientError(
+                "text_regions requires CODEX_API_BASE (no local fallback)",
+                status=-1,
+            )
+        path = f"/v1/documents/{pdf_hash}/text-regions?page_index={page_index}&dpi={dpi}"
+        _status, response_body, _headers = self._get(path)
+        return json.loads(response_body)
+
+    def conformance(
+        self,
+        document_id: str,
+        profile: str,
+    ) -> dict[str, Any]:
+        """Compute (or fetch from cache) a conformance verdict for the
+        given profile. Cache key: ``(pdf_hash, profile)``. Idempotent.
+
+        Profile must be one of ``pdfx4``, ``pdfx1a``, ``pdfx3``,
+        ``pdfa1b``, ``pdfa2b``, ``pdfa3b``, ``pdfua1`` — the enum is
+        forward-compatible; consumers must treat unknown values as
+        opaque. Raises :class:`CodexClientError` with ``status=404``
+        when the document isn't in cache.
+        """
+        self._require_http_or_local()
+        if not self.is_http:
+            raise CodexClientError(
+                "conformance requires CODEX_API_BASE (no local fallback)",
+                status=-1,
+            )
+        path = f"/v1/documents/{document_id}/conformance/{profile}"
+        _status, response_body, _headers = self._post(
+            path,
+            body=b"",
+            content_type="application/json",
+            accept="application/json",
+        )
+        return json.loads(response_body)
+
+    def list_renders(self, pdf_hash: str) -> dict[str, Any]:
+        """List ``(page_index, dpi, color_space)`` tuples already in the
+        render cache for ``pdf_hash``. Render cache key:
+        ``(pdf_hash, page_index, dpi, color_space)``.
+        """
+        self._require_http_or_local()
+        if not self.is_http:
+            raise CodexClientError(
+                "list_renders requires CODEX_API_BASE (no local fallback)",
+                status=-1,
+            )
+        _status, response_body, _headers = self._get(
+            f"/v1/documents/{pdf_hash}/renders"
         )
         return json.loads(response_body)
 

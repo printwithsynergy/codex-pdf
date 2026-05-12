@@ -38,6 +38,56 @@ def test_cache_key_is_content_addressed() -> None:
     assert a.startswith(f"codex:{VERSION}:page:")
 
 
+def test_cache_key_separates_tenants() -> None:
+    """Two tenants get distinct keys for the same input."""
+    a = cache_key(b"%PDF-1", {"page": 1}, kind="page", tenant="tenant-a")
+    b = cache_key(b"%PDF-1", {"page": 1}, kind="page", tenant="tenant-b")
+    assert a != b
+    # Default tenant falls between the literal tenant labels.
+    default = cache_key(b"%PDF-1", {"page": 1}, kind="page")
+    assert default != a
+    assert default != b
+
+
+def test_cache_key_stable_across_process_restarts() -> None:
+    """Cache keys survive process boundaries.
+
+    Codex relies on the cache key being a pure function of
+    (VERSION, kind, tenant, pdf_bytes, args). Subprocesses must
+    compute the same key from the same inputs so a multi-replica
+    deployment (each Python worker its own process) doesn't fragment
+    its cache. This test runs the key derivation in a subprocess
+    and asserts byte-for-byte identity.
+    """
+    import subprocess
+    import sys
+
+    main_key = cache_key(
+        b"%PDF-test\nstable-key-fixture",
+        {"page_index": 0, "dpi": 150},
+        kind="text-regions",
+        tenant="stability-test",
+    )
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from codex_pdf.api.cache import cache_key; "
+                "print(cache_key("
+                "b'%PDF-test\\nstable-key-fixture', "
+                "{'page_index': 0, 'dpi': 150}, "
+                "kind='text-regions', tenant='stability-test'))"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    subprocess_key = proc.stdout.strip()
+    assert subprocess_key == main_key, (subprocess_key, main_key)
+
+
 def test_memory_cache_round_trip() -> None:
     c = MemoryCache(maxsize=2)
     c.set("a", b"1")
