@@ -827,21 +827,77 @@ Carried over from the unified extraction campaign:
 
 **Phase 1 — Implementations.**
 
-- Per signal kind, a thin Claude-backed extractor in
-  `codex_pdf.ai/`:
-  - `language.py` — `detect_language(page_image)` → BCP-47 + confidence.
-  - `logos.py` — `detect_logos(page_image)` → list of bbox + identity.
+### Two backends from day one
+
+Most self-hosters and the public demo will never have access to a
+GPU. Phase 1 ships **CPU + Claude as the default**; GPU is opt-in
+for SaaS / Enterprise tiers. See `docs/policies.md` >
+"Two AI backends" for the full table.
+
+- **Tier 1 — Default (demo + OSS):** Claude Haiku 4.5 for every
+  signal kind. CPU libraries (`pyzbar`, `pylibdmtx`, perceptual
+  hashing) for the specialised tasks Claude isn't precise about.
+  No GPU dependency. No Modal account required.
+- **Tier 2 — Optional (SaaS / Enterprise):** when
+  `CODEX_AI_GPU_URL` is set, embedding-heavy workloads (font
+  similarity, visual diff, NSFW) route to a self-hosted GPU
+  service. Same cost-cap + circuit-breaker pattern as lint-pdf's
+  GPU client; Claude is the fallback when GPU is unreachable.
+
+The **public demo MUST stay on Tier 1.** That's a hard rule —
+when `CODEX_AI_ENABLED=true` is set on the demo deployment,
+`CODEX_AI_GPU_URL` MUST be unset. Codex emits
+`CodexWarning(code="ai_tier", value="cpu+claude")` in the
+extraction response so consumers can render the running tier
+honestly.
+
+### Extractor modules
+
+- Per signal kind, a thin extractor in `codex_pdf.ai/`:
+  - `language.py` — `detect_language(page_image)` → BCP-47 +
+    confidence. Claude Haiku (cheap; text+small-image input).
+  - `logos.py` — `detect_logos(page_image)` → list of bbox +
+    identity. Claude Sonnet 4.6 (vision quality matters here);
+    Haiku fallback when budget cap is approaching.
   - `symbols.py` — `detect_symbols(page_image)` → list of bbox +
     kind from a curated catalogue (GHS, FDA, CE, recycle, …).
+    Claude Sonnet for the visual match; falls back to a curated
+    template-matcher (CPU) when Claude is unavailable.
   - `barcodes.py` — `decode_barcodes(page_image)` via pyzbar /
-    pylibdmtx (specialised, not Claude). Same interface.
+    pylibdmtx. **CPU-only, no AI dep.** Same interface so
+    consumers don't have to special-case.
   - `classification.py` — `classify_document(pdf_bytes)` →
-    `{category: prob}`.
+    `{category: prob}`. Claude Haiku on first-page render.
   - `spell.py` — `flag_spell_candidates(text)` → list of unknown
-    words, no dictionary policy.
+    words, no dictionary policy. CPU dictionary lookup + optional
+    Claude pass for "is this a word at all" on candidates.
+
+### Cost ceiling
+
 - Same cost-cap + outage-recording pattern as lint-pdf's
-  `ai/legend_claude.py`. Aggressive 1h prompt caching.
+  `ai/legend_claude.py`. Aggressive 1h prompt caching on system
+  prompts + tool schemas — cached input is 10% of normal cost.
+- `CODEX_AI_COST_CAP_USD_PER_REQUEST` (default $0.10) aborts the
+  extraction with `CodexWarning(code="ai_budget_exceeded")` and
+  empty signal fields when projected Claude spend on a single
+  `/v1/extract` would exceed the cap. Guard rail against a 200-page
+  PDF blowing the bill.
+
+### Caching
+
 - Each extractor cached at codex's standard
   `(tenant, pdf_hash, kind)` key. Second reader hits cache.
-- Instrument latency per kind. Numbers feed Phase 1.5.
+- Cache survives lint / loupe / compile re-reads: the same PDF's
+  signals are extracted once across the entire fleet.
+
+### Instrumentation
+
+- Instrument latency per kind. Numbers feed Phase 1.5
+  (sync-vs-async decision per kind).
+- New Prometheus surface:
+  - `codex_ai_calls_total{kind, model, outcome}` —
+    outcome ∈ `success` / `cap_hit` / `gpu_unavailable` /
+    `claude_error`.
+  - `codex_ai_cost_usd_total{kind, model}` — running sum so cost
+    dashboards stop being a surprise. Reset per deploy.
 
