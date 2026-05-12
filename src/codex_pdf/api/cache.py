@@ -137,18 +137,29 @@ def make_cache():
        ``MemoryCache`` with a logged warning so operators can spot the
        fallback in deploy logs.
 
+    TTL knob: ``CODEX_CACHE_TTL_SECONDS`` (default 86400 / 24h) applies
+    to ``RedisCache`` SETEX. ``MemoryCache`` is LRU-only and ignores the
+    TTL — entries live until evicted by size pressure. The
+    operator-facing knob is the single source of truth for "how long
+    can a derived artifact live" across both backends.
+
     This function MUST NOT raise. The codex API treats the cache as a
     soft dependency: even if every backend is misconfigured the
     service must still come up and serve requests (cache misses on
     every call, but functional).
     """
     redis_url = (os.environ.get("CODEX_REDIS_URL") or "").strip()
+    ttl = _ttl_from_env()
     if not redis_url:
-        logger.info("codex cache: in-memory (CODEX_REDIS_URL unset)")
+        logger.info(
+            "codex cache: in-memory (CODEX_REDIS_URL unset; TTL knob ignored, LRU only)"
+        )
         return MemoryCache()
     try:
-        cache = RedisCache(redis_url)
-        logger.info("codex cache: redis (%s)", _mask_url(redis_url))
+        cache = RedisCache(redis_url, ttl_seconds=ttl)
+        logger.info(
+            "codex cache: redis (%s, ttl=%ds)", _mask_url(redis_url), ttl
+        )
         return cache
     except Exception as exc:
         logger.warning(
@@ -174,3 +185,35 @@ def _mask_url(url: str) -> str:
         return url
     except Exception:
         return "<redacted>"
+
+
+_DEFAULT_CACHE_TTL_SECONDS = 86400
+
+
+def _ttl_from_env() -> int:
+    """Resolve the operator-facing cache TTL knob.
+
+    Reads ``CODEX_CACHE_TTL_SECONDS`` (default 86400 / 24h). Invalid
+    values fall back to the default with a warning — a typo'd env
+    must never break service boot.
+    """
+    raw = (os.environ.get("CODEX_CACHE_TTL_SECONDS") or "").strip()
+    if not raw:
+        return _DEFAULT_CACHE_TTL_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "CODEX_CACHE_TTL_SECONDS=%r is not an integer; using default %ds",
+            raw,
+            _DEFAULT_CACHE_TTL_SECONDS,
+        )
+        return _DEFAULT_CACHE_TTL_SECONDS
+    if value <= 0:
+        logger.warning(
+            "CODEX_CACHE_TTL_SECONDS=%d must be positive; using default %ds",
+            value,
+            _DEFAULT_CACHE_TTL_SECONDS,
+        )
+        return _DEFAULT_CACHE_TTL_SECONDS
+    return value
