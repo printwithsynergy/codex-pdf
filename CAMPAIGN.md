@@ -46,7 +46,7 @@ Draft PRs only.
 - [x] Phase 1.5 — Sync-vs-async conformance decision — _resolved
   inline; see Phase 1 log_
 - [x] Phase 2 — Operational contract (errors, tenancy, rate
-  limits, parity) — PR _pending_
+  limits, parity) — PR #19 (merged `d79cbad`), rc.2 cut _pending_
 - [ ] Phase 3 — Consumer rollout + observability
 - [ ] Phase 4 — Long-tail (versioning, eviction, SLOs)
 - [ ] Synthesis — Emit consumer + marketing prompts
@@ -231,7 +231,13 @@ the log for traceability.
   can flip when ready. Phase 1 is additive — the contract shape
   doesn't change.
 
-### Phase 2 — 2026-05-11 — PR _pending_
+### Phase 2 — 2026-05-11 — PR #19 — merged
+
+**rc.2 cut:** Python `1.9.0rc2`, TS `1.9.0-rc.2` (lockstep).
+No new endpoints; contract surface identical to `1.9.0-rc.1`
+on the response shape. Cache-key shape changed deliberately —
+operators upgrading from rc.1 see cold caches on first request.
+
 
 **Shipped:**
 - **Tenancy.** ``cache_key`` now keys on
