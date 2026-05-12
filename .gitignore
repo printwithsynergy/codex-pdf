@@ -11,3 +11,7 @@ coverage.xml
 htmlcov/
 node_modules/
 .wrangler/
+
+# Build artifacts from local release runs
+/dist-*/
+/clients/ts/pnpm-lock.yaml
