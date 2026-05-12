@@ -1,5 +1,27 @@
 """Package version.
 
+1.15.0 (minor): Root-cause fix for ``dieline.count == 0`` mismatch.
+When the bbox-based dieline detector (``_estimate_dieline_size``'s
+geometry-fallback path) produces a real ``dieline.size`` with
+``source="analysis_stroke_bbox"`` but no named candidate hit any
+of the registry-driven paths (OCG name, processing step, trap
+layer, analysis signal), codex now synthesises a placeholder
+candidate so ``dieline.count == 1`` and ``dieline.candidates``
+is non-empty. Without this, demos showed
+``Detected dieline size 4.98 x 6.53 in`` alongside
+``Dieline candidates: 0`` / ``No dieline-style layers detected``
+— confusing nonsense.
+
+Additive schema additions on
+``CodexSummaryDielineCandidate``:
+
+- ``source`` literal gains ``"analysis_stroke_bbox"``.
+- ``reason_codes`` literal gains ``"geometry_fallback_size_detected"``.
+
+Top-level schema_version unchanged at 1.3.0 — consumers must
+treat the Literal union as forward-compatible (open enum) per
+the policies-doc forward-compatibility rule.
+
 1.14.0 (minor): AI Signal Campaign — Phase 2 (operational
 contract). Per-tenant entitlements for the AI signal lane.
 
@@ -118,5 +140,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.14.0"
+VERSION = "1.15.0"
 __version__ = VERSION

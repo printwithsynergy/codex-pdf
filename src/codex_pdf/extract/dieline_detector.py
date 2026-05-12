@@ -415,6 +415,24 @@ def detect_dieline(
     overall_confidence = max((c.confidence for c in candidates), default=0.0)
     size = _estimate_dieline_size(doc, candidates, overall_confidence=overall_confidence)
 
+    # When no named candidate hit any of the registry paths but the
+    # geometry-only fallback in ``_estimate_dieline_size`` still
+    # produced a size (the bbox-based ``analysis_stroke_bbox``
+    # source), synthesise a placeholder candidate so ``count`` and
+    # ``candidates`` reflect the detection. Without this consumers
+    # see ``Detected dieline size 4.98 x 6.53 in`` alongside
+    # ``Dieline candidates: 0`` — confusing nonsense.
+    if not candidates and size.available and size.source == "analysis_stroke_bbox":
+        candidates = [
+            CodexSummaryDielineCandidate(
+                name="dieline (bbox)",
+                source="analysis_stroke_bbox",
+                confidence=size.confidence,
+                reason_codes=["geometry_fallback_size_detected"],
+            )
+        ]
+        overall_confidence = size.confidence
+
     return CodexSummaryDielineMetrics(
         count=len(candidates),
         candidates=candidates,

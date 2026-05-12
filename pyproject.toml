@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-pdf"
-version = "1.14.0"
+version = "1.15.0"
 description = "Authoritative, versioned PDF facts contract for Think Neverland tools."
 readme = "README.md"
 requires-python = ">=3.12"
