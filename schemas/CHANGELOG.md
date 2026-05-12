@@ -1,10 +1,12 @@
 # Schema Changelog
 
-## Unreleased
+## 1.9.0-rc.2 — 2026-05-12
 
 Phase 2 of the unified extraction campaign — operational contract
 hardening. No new endpoints; this release tightens what the
-existing endpoints do under load and across tenants.
+existing endpoints do under load and across tenants. Python
+`codex-pdf` and TypeScript `@printwithsynergy/codex-client` ship
+in lockstep at `1.9.0-rc.2`.
 
 ### Tenancy
 
