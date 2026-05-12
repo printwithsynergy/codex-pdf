@@ -1,11 +1,12 @@
 # Schema Changelog
 
-## Unreleased
+## 1.9.0-rc.3 — 2026-05-12
 
 Phase 3 of the unified extraction campaign — consumer rollout +
 observability. No new endpoints; this release brings the bundled
 clients up to the server contract and adds the metrics consumers
-need to wire dashboards.
+need to wire dashboards. Python `codex-pdf` and TypeScript
+`@printwithsynergy/codex-client` ship in lockstep at `1.9.0-rc.3`.
 
 ### Bundled clients now ship the Phase 1/2 surface
 
