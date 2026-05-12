@@ -1,38 +1,46 @@
 # Schema Changelog
 
-## Unreleased
+## 1.9.0 — 2026-05-12
 
-Phase 4 of the unified extraction campaign — long-tail policies.
-No new endpoints; this release formalises operator + consumer
-SLAs and adds one operator-facing knob.
+Final cut of the unified extraction campaign. All four planned
+phases (contract freeze → implementations → operational contract
+→ long-tail policies) are complete and deployed. Python
+`codex-pdf` and TypeScript `@printwithsynergy/codex-client` ship
+in lockstep at `1.9.0`.
 
-### Cache TTL knob
+This release supersedes the rc series (rc.0 → rc.3) and is
+promoted to the default channel:
 
-`CODEX_CACHE_TTL_SECONDS` (default `86400` / 24h) is now the
-single source of truth for the Redis cache's SETEX TTL.
-`MemoryCache` ignores the knob and stays LRU-only — process
-memory is bounded by bytes, not time. A garbage env value falls
-back to the default with a warning so service boot can't break
-on a typo.
+- PyPI: `codex-pdf==1.9.0` (default resolution, no `--pre`).
+- npm: `@printwithsynergy/codex-client@1.9.0` on the `latest`
+  dist-tag.
 
-### Policy SLAs
+The contract surface is identical to `1.9.0-rc.3`. Phase 4's
+``CODEX_CACHE_TTL_SECONDS`` knob plus ``docs/policies.md`` +
+``docs/slos.md`` rounded out the operator-facing SLAs.
 
-- `docs/policies.md` — `ConformanceProfile` enum versioning,
-  cache TTL semantics, backpressure model, observability
-  conventions. Documents what consumers can rely on across
-  releases.
-- `docs/slos.md` — published p50/p95/p99 latency targets,
-  availability targets, recommended alert lanes, cache-hit-rate
-  floors. Operators wire dashboards + alerts against the table;
-  consumers size their own SLOs against codex's published
-  numbers.
+### What 1.9.0 ships (summary)
 
-### Backpressure (model unchanged)
+- Unified extraction contract: `/v1/extract` as first-stop;
+  per-resource second-stop endpoints
+  (`GET /v1/documents/{pdf_hash}/text-regions`,
+  `POST /v1/documents/{document_id}/conformance/{profile}`,
+  `GET /v1/documents/{pdf_hash}/renders`).
+- Stage telemetry on every response
+  (`stage_durations_ms` + `X-Codex-Stage-Durations-Ms`).
+- Tenancy scoping on cache + blob store + renders index via
+  `X-Codex-Tenant`.
+- Rate limiting (`429 + Retry-After`) on compute-and-cache
+  POSTs. Knobs: `CODEX_RATE_LIMIT_RPM`,
+  `CODEX_RATE_LIMIT_BURST`, `CODEX_RATE_LIMIT_DISABLED`.
+- Bundled Python + TS clients with the full surface
+  (tenant option, new methods, Retry-After awareness).
+- Cache hit/miss + per-stage Prometheus metrics.
+- Cache TTL knob (`CODEX_CACHE_TTL_SECONDS`).
+- Published policy SLAs (`docs/policies.md`,
+  `docs/unified-extraction.md`) and SLOs (`docs/slos.md`).
 
-The `429 + Retry-After` shed-response from Phase 2's rate limiter
-is the only deliberate backpressure signal codex emits.
-Distributed (Redis-backed) accounting is on the roadmap;
-in-process limiter remains per-replica.
+See the rc series entries below for per-phase detail.
 
 ## 1.9.0-rc.3 — 2026-05-12
 
