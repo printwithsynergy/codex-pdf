@@ -32,6 +32,7 @@ from codex_pdf.ai import (
     logos as logos_mod,
     spell as spell_mod,
     symbols as symbols_mod,
+    trap_zones as trap_zones_mod,
 )
 from codex_pdf.ai.budget import AiBudgetExceededError
 from codex_pdf.ai.cache import get_cached, set_cached, signal_cache_key
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RENDER_DPI = 150
 
-_PAGE_KINDS = frozenset({"language", "logos", "symbols", "barcodes", "spell"})
+_PAGE_KINDS = frozenset({"language", "logos", "symbols", "barcodes", "spell", "trap_zones"})
 _DOCUMENT_KINDS = frozenset({"classification"})
 
 
@@ -253,6 +254,17 @@ def _dispatch(
             page_height_pt=height_pt,
         )
         return [r.model_dump(mode="json") for r in results]
+    if kind == "trap_zones":
+        width_pt, height_pt = _page_size_pt(pdf_bytes, page_index or 0)
+        png = _render_page_png(pdf_bytes, page_index or 0, render_dpi)
+        results = trap_zones_mod.extract_trap_zones(
+            context=context,
+            page_png=png,
+            page_index=page_index or 0,
+            page_width_pt=width_pt,
+            page_height_pt=height_pt,
+        )
+        return [r.model_dump(mode="json") for r in results]
     if kind == "classification":
         text = _document_text(payload)
         return classification_mod.extract_classification(
@@ -264,7 +276,7 @@ def _dispatch(
 def _empty_for_kind(kind: str) -> Any:
     if kind == "language":
         return None
-    if kind in {"logos", "symbols", "barcodes", "spell"}:
+    if kind in {"logos", "symbols", "barcodes", "spell", "trap_zones"}:
         return []
     if kind == "classification":
         return {}
@@ -319,7 +331,7 @@ def run_signals_on_document(
             continue
         if budget_stopped:
             break
-        for kind in ("language", "barcodes", "symbols", "logos", "spell"):
+        for kind in ("language", "barcodes", "symbols", "logos", "spell", "trap_zones"):
             result = run_signal(
                 context=context,
                 cache=cache,
@@ -350,3 +362,5 @@ def _attach_to_page(page: dict[str, Any], kind: str, data: Any) -> None:
         page["detected_barcodes"] = data or []
     elif kind == "spell":
         page["spell_candidates"] = data or []
+    elif kind == "trap_zones":
+        page["trap_zone_candidates"] = data or []

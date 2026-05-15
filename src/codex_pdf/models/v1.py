@@ -387,6 +387,30 @@ class CodexDetectedBarcode(BaseModel):
 # signals endpoint and as a key in any future signal aggregation. Forward
 # compatible: a future codex release may add ``"images"``, ``"fonts"``,
 # etc.; consumers must treat unknown values as opaque.
+class CodexTrapZoneCandidate(BaseModel):
+    """One detected ink-boundary candidate for trap zone generation.
+
+    Detected by Claude vision on a rendered page raster. Downstream
+    consumers (compile-pdf-trap) filter by ``confidence`` and convert
+    ``polygon_pt`` into trap zone declarations. Cache key:
+    ``(pdf_hash, page_index, "trap_zones")``.
+
+    ``content_type`` describes the nature of the boundary:
+    - ``"solid-solid"`` — two flat-colour regions meeting
+    - ``"text-bg"`` — text object against a background colour
+    - ``"image-image"`` — two image regions abutting
+    - ``"image-solid"`` — image region against a flat colour
+    """
+
+    page_index: int
+    polygon_pt: list[tuple[float, float]] = Field(default_factory=list)
+    from_ink: str
+    to_ink: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    content_type: Literal["solid-solid", "text-bg", "image-image", "image-solid"] = "solid-solid"
+    source: str = "unknown"
+
+
 SignalKind = Literal[
     "language",
     "logos",
@@ -394,6 +418,7 @@ SignalKind = Literal[
     "barcodes",
     "spell",
     "classification",
+    "trap_zones",
 ]
 
 
@@ -453,6 +478,11 @@ class CodexPage(BaseModel):
     # Pure unknown-word list (no dictionary policy). Lint applies tenant
     # spell rules on top; codex just emits the raw candidates.
     spell_candidates: list[str] = Field(default_factory=list)
+    # Ink-boundary candidates for trap zone inference (Codex AI Signal).
+    # Populated only when AI is enabled. Compile-pdf-trap reads these via
+    # ``trap_zones_source="codex_extract"`` to seed zone generation.
+    # Cache key: ``(pdf_hash, page_index, "trap_zones")``.
+    trap_zone_candidates: list[CodexTrapZoneCandidate] = Field(default_factory=list)
 
 
 class CodexSummaryCountMetrics(BaseModel):
