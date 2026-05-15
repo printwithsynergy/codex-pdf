@@ -1,4 +1,4 @@
-"""Spot-ink swatch resolver — host → codex → pantone → curated → hash.
+"""Spot-ink swatch resolver — host → codex → pantone → curated → ai → hash.
 
 The resolver is the single in-process entry point that lint and loupe
 both call (lint imports it directly; loupe calls the
@@ -13,7 +13,13 @@ The precedence ladder is:
    name (``PANTONE 485 C`` etc.) — first hit wins.
 4. **curated** — semantic spot map (cut, dieline, varnish, foil…)
    so role-named spots get a recognisable swatch.
-5. **hash** — final tie-breaker. Hash-derived hue, returned only
+5. **ai** — Claude Haiku estimates CIE Lab from the ink name.
+   Runs only when ``CODEX_AI_ENABLED=1`` and ``ANTHROPIC_API_KEY``
+   are set. Cached per ink name (``lru_cache``) so the LLM bill is
+   paid once per unique name per process. Tagged ``source: "ai"`` so
+   UIs can show an "AI-estimated" badge when the codex/Pantone path
+   didn't have data for this ink.
+6. **hash** — final tie-breaker. Hash-derived hue, returned only
    with ``source: "hash"`` so UIs can mark the swatch as approximate.
 
 The result always includes a concrete ``rgb``; downstream code never
@@ -28,7 +34,12 @@ path.
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Literal
 
 from codex_pdf.color.color_math import (
@@ -45,7 +56,9 @@ from codex_pdf.color.pantone import (
     lookup_pantone_spot,
 )
 
-SpotSwatchSource = Literal["host", "codex", "pantone", "curated", "hash"]
+SpotSwatchSource = Literal["host", "codex", "pantone", "curated", "ai", "hash"]
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -267,6 +280,73 @@ def hash_hue_rgb(name: str) -> RgbTriplet:
     )
 
 
+_AI_SYSTEM = (
+    "You are a color science expert. Given a spot printing ink name, return your "
+    "best estimate of its CIE Lab (D50 illuminant) color values. "
+    "Output ONLY valid JSON — no prose, no markdown: "
+    '{"L": <0..100>, "a": <-128..127>, "b": <-128..127>}. '
+    "If the name carries no color information (e.g. 'Die', 'Cut', 'Crease', "
+    "'Emboss', 'Varnish'), return null."
+)
+
+
+@lru_cache(maxsize=512)
+def _ai_lab_estimate(spot_name: str) -> tuple[float, float, float] | None:
+    """Call Claude Haiku to estimate CIE Lab for an unknown spot ink name.
+
+    Cached per ink name (process-lifetime) so each unique name is queried
+    at most once per process. Requires ``CODEX_AI_ENABLED=1`` and
+    ``ANTHROPIC_API_KEY`` in the environment; returns ``None`` silently
+    when either is absent or the call fails.
+    """
+    if os.environ.get("CODEX_AI_ENABLED", "").lower() not in {"1", "true", "yes"}:
+        return None
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+    try:
+        client = anthropic.Anthropic(api_key=api_key, max_retries=1, timeout=10.0)
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=64,
+            system=_AI_SYSTEM,
+            messages=[{"role": "user", "content": f"Spot ink name: {spot_name!r}"}],
+        )
+        text = "".join(
+            block.text for block in response.content if hasattr(block, "text")
+        ).strip()
+    except Exception as exc:
+        _logger.debug("ai_lab_estimate failed for %r: %s", spot_name, exc)
+        return None
+    if not text or text.lower() == "null":
+        return None
+    m = re.search(r"\{.*?\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group())
+        if data is None:
+            return None
+        return (float(data["L"]), float(data["a"]), float(data["b"]))
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _try_ai(spot_name: str) -> SpotSwatchResolution | None:
+    lab = _ai_lab_estimate(spot_name)
+    if lab is None:
+        return None
+    return SpotSwatchResolution(
+        rgb=lab_d50_to_srgb(lab),
+        source="ai",
+        lab=lab,
+    )
+
+
 def resolve_spot_swatch_color(
     spot_name: str,
     *,
@@ -296,5 +376,6 @@ def resolve_spot_swatch_color(
             extra_pantone_overrides=extra_pantone_overrides,
         )
         or _try_curated(spot_name, extra_curated_tokens)
+        or _try_ai(spot_name)
         or SpotSwatchResolution(rgb=hash_hue_rgb(spot_name), source="hash")
     )

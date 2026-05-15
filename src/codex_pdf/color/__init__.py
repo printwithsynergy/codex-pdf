@@ -10,8 +10,10 @@ maths, and the resolver-precedence ladder live in exactly one place.
 Public surface:
 
 - :func:`resolve_spot_swatch_color` — host → codex → pantone → curated
-  → hash precedence ladder, returning a ``SpotSwatchResolution`` with
-  rgb/lab/cmyk/source/pantone_name fields populated when known.
+  → ai → hash precedence ladder. The ``"ai"`` step calls Claude Haiku
+  to estimate CIE Lab when ``CODEX_AI_ENABLED=1``; cached per ink name.
+  Returns a ``SpotSwatchResolution`` with rgb/lab/cmyk/source/pantone_name
+  fields populated when known.
 - :func:`match_pantone` — find the nearest Pantone entry to a given
   Lab/CMYK/RGB measurement using CIEDE2000 ΔE.
 - :func:`load_inkbook` — return the bundled curated catalog plus a
@@ -61,7 +63,7 @@ from codex_pdf.color.resolver import (
     resolve_spot_swatch_color,
 )
 
-COLOR_SCHEMA_VERSION = "1.1.0"
+COLOR_SCHEMA_VERSION = "1.2.0"
 """Per-section schema version for the ``/v1/color/*`` HTTP surface.
 
 Bumped independently of the top-level codex-document schema so a
