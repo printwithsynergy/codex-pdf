@@ -1,5 +1,22 @@
 """Package version.
 
+1.17.0 (minor): Effective DPI now uses actual placed image rect.
+
+The previous _estimate_dpi() used full page dimensions as a proxy,
+giving meaningless results (e.g. a 72px image on an 8.5in page
+showed ~8 DPI instead of the true placement-based value). The fix
+uses page.get_image_rects(xref) from PyMuPDF to get the actual
+rendered bounds. An image placed multiple times on the same page
+at different sizes now emits one CodexImage record per placement,
+each with the correct effective_resolution_dpi.
+
+New CodexImage fields:
+- placed_width_pts: float | None — rendered width in points
+- placed_height_pts: float | None — rendered height in points
+- bbox_effective: now populated from get_image_rects() rect
+
+schema_version unchanged (additive new optional fields).
+
 1.15.0 (minor): Root-cause fix for ``dieline.count == 0`` mismatch.
 When the bbox-based dieline detector (``_estimate_dieline_size``'s
 geometry-fallback path) produces a real ``dieline.size`` with
@@ -140,5 +157,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.15.0"
+VERSION = "1.17.0"
 __version__ = VERSION

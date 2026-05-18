@@ -148,6 +148,8 @@ class CodexImage(BaseModel):
     color_space_id: str | None = None
     compression: str | None = None
     soft_mask: bool = False
+    placed_width_pts: float | None = None   # rendered width on page in points
+    placed_height_pts: float | None = None  # rendered height on page in points
     bbox_effective: CodexBBox | None = None
     effective_resolution_dpi: CodexResolution | None = None
 
