@@ -149,6 +149,39 @@ export interface ExtractResponse {
   readonly [key: string]: unknown;
 }
 
+/**
+ * Sparse-projection field name. Any ``CodexDocument`` top-level key or
+ * page sub-field name is accepted. ``"spot_colors"`` is an alias for
+ * ``"color_spaces"``. Added in 1.18.0.
+ *
+ * @public
+ */
+export type CodexField =
+  | "pdf_version" | "is_encrypted" | "is_linearized" | "conformance" | "info"
+  | "xmp" | "trapped_flag" | "trap_evidence" | "pages" | "fonts" | "images"
+  | "annotations" | "output_intents" | "color_spaces" | "spot_colors"
+  | "icc_profiles" | "ocgs" | "form_xobjects" | "analysis" | "summary"
+  | "document_classification" | "detected_language" | "detected_barcodes"
+  | "detected_logos" | "detected_symbols" | "spell_candidates"
+  | "trap_zone_candidates" | "inventory" | "transparency_tree"
+  | (string & Record<never, never>);  // allow unknown future fields
+
+/**
+ * Options for ``extract()``. Added in 1.18.0.
+ *
+ * @public
+ */
+export interface ExtractOptions {
+  /**
+   * Request only these fields. Codex runs only the extractors required
+   * and returns only the listed fields plus always-included metadata
+   * (``document_id``, ``pdf_sha256``, ``extraction_warnings``, …).
+   *
+   * Omit to receive the full document (default behaviour).
+   */
+  fields?: CodexField[];
+}
+
 // ---------------------------------------------------------------------------
 // Unified extraction contract (1.9.0). Mirrors the Python surface
 // (CodexDetectedTextRegion, CodexConformanceVerdict, CodexClauseFailure).
@@ -629,6 +662,7 @@ export class HttpClient {
     body: BodyInit,
     accept = "application/json",
     contentType?: string,
+    extraHeaders?: Record<string, string>,
   ): Promise<Response> {
     let lastErr: unknown;
     const requestId = this.newRequestId();
@@ -643,7 +677,7 @@ export class HttpClient {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
-          const headers: Record<string, string> = this.headers(target, requestId, { Accept: accept });
+          const headers: Record<string, string> = this.headers(target, requestId, { Accept: accept, ...extraHeaders });
           if (contentType) headers["Content-Type"] = contentType;
           const res = await this.fetchImpl(target.baseUrl + path, {
             method: "POST",
@@ -974,9 +1008,13 @@ export class HttpClient {
 
   // ----------------------- extract ------------------------------
 
-  async extract(pdf: ArrayBuffer | Uint8Array | Blob): Promise<ExtractResponse> {
+  async extract(pdf: ArrayBuffer | Uint8Array | Blob, options: ExtractOptions = {}): Promise<ExtractResponse> {
     const fd = this.buildForm(pdf, {});
-    const res = await this.post("/v1/extract", fd);
+    const extraHeaders: Record<string, string> = {};
+    if (options.fields && options.fields.length > 0) {
+      extraHeaders["X-Codex-Fields"] = options.fields.join(", ");
+    }
+    const res = await this.post("/v1/extract", fd, "application/json", undefined, extraHeaders);
     const header = res.headers.get("X-Codex-Stage-Durations-Ms");
     const body = (await res.json()) as ExtractResponse;
     if (header && body && typeof body === "object" && !("stage_durations_ms" in body)) {

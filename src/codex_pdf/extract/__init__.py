@@ -9,6 +9,7 @@ from codex_pdf.extract.document import (
     extract_document,
     extract_document_fast,
     extract_document_pymupdf_only,
+    extract_document_sparse,
     extract_from_path,
 )
 from codex_pdf.extract.probe import extract_probe_min, extract_probe_std
@@ -23,6 +24,7 @@ __all__ = [
     "extract_document",
     "extract_document_fast",
     "extract_document_pymupdf_only",
+    "extract_document_sparse",
     "extract_from_path",
     "extract_probe_min",
     "extract_probe_std",

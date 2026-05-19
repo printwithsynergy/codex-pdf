@@ -245,6 +245,82 @@ def extract_document(pdf_bytes: bytes, *, source_uri: str | None = None) -> Code
     )
 
 
+def extract_document_sparse(
+    pdf_bytes: bytes,
+    *,
+    fields: set[str],
+    source_uri: str | None = None,
+) -> CodexDocument:
+    """Run only the extractors required to populate *fields*.
+
+    Used by the sparse-projection path when the caller sets
+    ``X-Codex-Fields``.  The fitz pipeline always runs (it is fast and
+    provides the core document structure); pikepdf passes are skipped
+    when no requested field depends on them.  AI signals are not run
+    here — the caller decides which AI kinds to request and runs them
+    separately via the dispatcher.
+    """
+    from codex_pdf.extract.sparse import (
+        resolve_groups,
+        GRP_PIKEPDF_COLOR,
+        GRP_PIKEPDF_OCGS,
+        GRP_PIKEPDF_FORMS,
+        GRP_PIKEPDF_SIGNALS,
+    )
+
+    groups = resolve_groups(fields)
+
+    fitz_data = _run_fitz_pipeline(pdf_bytes)
+
+    futures: dict[str, Future] = {}
+    if GRP_PIKEPDF_COLOR in groups:
+        futures["color"] = _EXTRACT_POOL.submit(extract_color_world_pikepdf, pdf_bytes)
+    if GRP_PIKEPDF_OCGS in groups:
+        futures["ocgs"] = _EXTRACT_POOL.submit(extract_ocgs_pikepdf, pdf_bytes)
+    if GRP_PIKEPDF_FORMS in groups:
+        futures["forms"] = _EXTRACT_POOL.submit(extract_forms_pikepdf, pdf_bytes)
+    if GRP_PIKEPDF_SIGNALS in groups:
+        futures["signals"] = _EXTRACT_POOL.submit(extract_analysis_signals_pikepdf, pdf_bytes)
+
+    output_intents: list = []
+    color_spaces: list = []
+    ocgs: list = []
+    form_xobjects: list = []
+    analysis: dict = {}
+
+    if "color" in futures:
+        try:
+            output_intents, color_spaces = futures["color"].result()
+        except Exception:
+            pass
+    if "ocgs" in futures:
+        try:
+            ocgs = futures["ocgs"].result()
+        except Exception:
+            pass
+    if "forms" in futures:
+        try:
+            form_xobjects = futures["forms"].result()
+        except Exception:
+            pass
+    if "signals" in futures:
+        try:
+            analysis = futures["signals"].result()
+        except Exception:
+            pass
+
+    return assemble_codex_document(
+        pdf_bytes,
+        source_uri=source_uri,
+        fitz_data=fitz_data,
+        output_intents=output_intents,
+        color_spaces=color_spaces,
+        ocgs=ocgs,
+        form_xobjects=form_xobjects,
+        analysis=analysis,
+    )
+
+
 def extract_document_fast(pdf_bytes: bytes, *, source_uri: str | None = None) -> CodexDocument:
     """Fast extract for Phase 1 streaming: PyMuPDF structure + parallel pikepdf colors/layers.
 

@@ -292,13 +292,14 @@ def run_signals_on_document(
     tenant: str,
     pdf_hash: str,
     render_dpi: int = DEFAULT_RENDER_DPI,
+    kinds: set[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Run every signal kind across the document, mutating ``payload``.
+    """Run signal kinds across the document, mutating ``payload``.
 
-    Returns a list of warnings to be appended to
-    ``extraction_warnings`` — typically empty when everything ran,
-    or ``ai_budget_exceeded`` entries when the cost cap stopped
-    midway.
+    ``kinds`` — when provided, only the listed signal kinds are run (sparse
+    projection path). ``None`` means run all kinds (default full-extract
+    behaviour). Returns a list of warnings to be appended to
+    ``extraction_warnings``.
     """
     if not context.runnable:
         return []
@@ -312,19 +313,20 @@ def run_signals_on_document(
 
     # Document classification first — fastest signal, lets the consumer
     # see something even if the per-page lane gets capped.
-    cls_result = run_signal(
-        context=context,
-        cache=cache,
-        pdf_bytes=pdf_bytes,
-        payload=payload,
-        tenant=tenant,
-        pdf_hash=pdf_hash,
-        kind="classification",
-    )
-    if cls_result.warning is not None:
-        warnings.append(cls_result.warning)
-        budget_stopped = True
-    payload["document_classification"] = cls_result.data or {}
+    if kinds is None or "classification" in kinds:
+        cls_result = run_signal(
+            context=context,
+            cache=cache,
+            pdf_bytes=pdf_bytes,
+            payload=payload,
+            tenant=tenant,
+            pdf_hash=pdf_hash,
+            kind="classification",
+        )
+        if cls_result.warning is not None:
+            warnings.append(cls_result.warning)
+            budget_stopped = True
+        payload["document_classification"] = cls_result.data or {}
 
     for idx, page in enumerate(pages):
         if not isinstance(page, dict):
@@ -332,6 +334,8 @@ def run_signals_on_document(
         if budget_stopped:
             break
         for kind in ("language", "barcodes", "symbols", "logos", "spell", "trap_zones"):
+            if kinds is not None and kind not in kinds:
+                continue
             result = run_signal(
                 context=context,
                 cache=cache,

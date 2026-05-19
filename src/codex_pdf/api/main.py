@@ -90,10 +90,17 @@ from codex_pdf.extract import (
     extract_document,
     extract_document_fast,
     extract_document_pymupdf_only,
+    extract_document_sparse,
     extract_from_path,
     extract_probe_min,
     extract_probe_std,
     extract_text_regions_for_page,
+)
+from codex_pdf.extract.sparse import (
+    filter_document_payload,
+    parse_fields_header,
+    resolve_ai_kinds,
+    resolve_groups,
 )
 from codex_pdf.extract.color import extract_color_world_pikepdf
 from codex_pdf.extract.document import _EXTRACT_POOL, _run_fitz_pipeline
@@ -846,6 +853,12 @@ def _run_extract(raw: bytes, tenant: str = "default") -> dict[str, Any]:
     return payload
 
 
+def _run_extract_sparse(raw: bytes, fields: set[str]) -> dict[str, Any]:
+    """Run only the extractors needed for *fields*; no caching (fields vary)."""
+    doc = extract_document_sparse(raw, fields=fields)
+    return doc.model_dump(mode="json")
+
+
 def _run_extract_phase1(raw: bytes, tenant: str = "default") -> dict[str, Any]:
     """Phase 1 extract with sha-only cache key.
 
@@ -951,12 +964,23 @@ async def _extract_impl(
     started = time.perf_counter()
     tenant = _request_tenant(request)
     _enforce_rate_limit(tenant, "extract")
+    # Sparse field projection: parse X-Codex-Fields header.
+    requested_fields = parse_fields_header(request.headers.get("x-codex-fields"))
     try:
         raw = await _read_extract_pdf(request, pdf)
         sha = hashlib.sha256(raw).hexdigest()
         _blob_store.put(sha, raw, tenant=tenant)
         loop = asyncio.get_event_loop()
-        payload = await loop.run_in_executor(None, _run_extract, raw, tenant)
+
+        if requested_fields:
+            # Sparse path: run only extractors needed for the requested fields.
+            payload = await loop.run_in_executor(
+                None, _run_extract_sparse, raw, requested_fields
+            )
+        else:
+            # Full path: run all extractors (cached).
+            payload = await loop.run_in_executor(None, _run_extract, raw, tenant)
+
         # Surface the cache key so clients can switch to hash-based
         # render calls without re-uploading on every interaction.
         if isinstance(payload, dict):
@@ -964,41 +988,54 @@ async def _extract_impl(
         # Warm the page-1 render cache in the background — don't block the response.
         asyncio.ensure_future(loop.run_in_executor(None, _pre_render_bg, raw, tenant))
         await _maybe_retain(request, raw, sha, payload, retain_form_value)
-        # AI signal lane (Phase 1, 1.11.0): when CODEX_AI_ENABLED=true
-        # and the caller didn't opt out, run the six extractors and
-        # mutate the payload in place. ``extra_warnings`` covers
-        # partial completion (cost cap hit mid-run).
+        # AI signal lane: when CODEX_AI_ENABLED=true and the caller didn't opt
+        # out, run the signal extractors and mutate the payload in place.
+        # On the sparse path only the requested AI kinds are run.
         extra_ai_warnings: list[dict[str, str]] = []
         ai_context = build_context(
             caller_skipped=_ai_skipped(request), tenant=tenant
         )
         if isinstance(payload, dict):
             if ai_context.runnable:
-                def _run_ai() -> list[dict[str, str]]:
-                    return run_signals_on_document(
-                        context=ai_context,
-                        cache=_cache,
-                        pdf_bytes=raw,
-                        payload=payload,
-                        tenant=tenant,
-                        pdf_hash=sha,
-                    )
+                # Resolve which AI kinds to run.
+                if requested_fields:
+                    groups = resolve_groups(requested_fields)
+                    ai_kinds = resolve_ai_kinds(groups)
+                    # ai_kinds is None when no AI fields were requested → skip AI.
+                else:
+                    ai_kinds = None  # None means run all kinds.
 
-                extra_ai_warnings = await loop.run_in_executor(None, _run_ai)
-                # Phase 4: increment per-kind metric for each signal
-                # the extract lane attempted. Budget-exceeded kinds
-                # come back as warnings; everything else counts as ok.
-                if AI_CALLS is not None:
-                    budgeted_out = {
-                        (w.get("scope") or "").split(".", 1)[-1]
-                        for w in extra_ai_warnings
-                        if isinstance(w, dict) and w.get("code") == "ai_budget_exceeded"
-                    }
-                    for kind, versions in AI_MODEL_VERSIONS.items():
-                        status_label = "budget_exceeded" if kind in budgeted_out else "ok"
-                        AI_CALLS.labels(
-                            kind=kind, model=versions.get("model", "?"), status=status_label
-                        ).inc()
+                if ai_kinds is None and requested_fields:
+                    # Sparse path with no AI fields requested — skip the AI lane.
+                    pass
+                else:
+                    def _run_ai() -> list[dict[str, str]]:
+                        return run_signals_on_document(
+                            context=ai_context,
+                            cache=_cache,
+                            pdf_bytes=raw,
+                            payload=payload,
+                            tenant=tenant,
+                            pdf_hash=sha,
+                            kinds=ai_kinds,
+                        )
+
+                    extra_ai_warnings = await loop.run_in_executor(None, _run_ai)
+                    # Phase 4: increment per-kind metric for each signal attempted.
+                    if AI_CALLS is not None:
+                        budgeted_out = {
+                            (w.get("scope") or "").split(".", 1)[-1]
+                            for w in extra_ai_warnings
+                            if isinstance(w, dict) and w.get("code") == "ai_budget_exceeded"
+                        }
+                        ran_kinds = set(ai_kinds) if ai_kinds is not None else set(AI_MODEL_VERSIONS)
+                        for kind, versions in AI_MODEL_VERSIONS.items():
+                            if kind not in ran_kinds:
+                                continue
+                            status_label = "budget_exceeded" if kind in budgeted_out else "ok"
+                            AI_CALLS.labels(
+                                kind=kind, model=versions.get("model", "?"), status=status_label
+                            ).inc()
             _annotate_ai_status(
                 payload,
                 request,
@@ -1007,6 +1044,11 @@ async def _extract_impl(
                 extra_warnings=extra_ai_warnings,
                 tenant=tenant,
             )
+
+        # On the sparse path filter the response to only the requested fields.
+        if requested_fields and isinstance(payload, dict):
+            payload = filter_document_payload(payload, requested_fields)
+
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         durations = {"extract": elapsed_ms}
         _record_stage("extract", elapsed_ms)
@@ -1107,7 +1149,21 @@ async def extract_endpoint(
     pdf: UploadFile | None = File(default=None),
     retain_for_training: str | None = Form(default=None),
 ) -> JSONResponse:
-    """Extract a CodexDocument from an uploaded PDF or remote URL."""
+    """Extract a CodexDocument from an uploaded PDF or remote URL.
+
+    **Sparse field projection** — set ``X-Codex-Fields`` to a
+    comma-separated list of field names to run only the extractors needed
+    for those fields and receive a filtered response::
+
+        X-Codex-Fields: detected_barcodes, color_spaces
+
+    Supported field names: any top-level ``CodexDocument`` key plus the
+    page-level sub-fields ``detected_barcodes``, ``detected_language``,
+    ``detected_logos``, ``detected_symbols``, ``spell_candidates``,
+    ``trap_zone_candidates``, ``inventory``, and ``transparency_tree``.
+    The alias ``spot_colors`` maps to ``color_spaces``.  Omitting the
+    header returns the full document (default behaviour).
+    """
     return await _extract_impl(
         request, pdf, endpoint_label="extract", retain_form_value=retain_for_training
     )

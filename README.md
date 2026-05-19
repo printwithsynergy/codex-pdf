@@ -17,7 +17,7 @@ schema-validated.
 
 ## Status
 
-`codex-pdf 1.8.1`. Current surface includes:
+`codex-pdf 1.18.0`. Current surface includes:
 
 - Python package (`codex_pdf`) with typed `pydantic` models.
 - CLI (`codex-pdf extract|schema|contract|validate|probe|parity|render|serve`).
