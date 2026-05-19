@@ -1,5 +1,53 @@
 """Package version.
 
+1.18.0 (minor): Sparse field projection via X-Codex-Fields header.
+
+Callers can now pass ``X-Codex-Fields: <comma-separated field names>``
+on ``POST /v1/extract`` to run only the extractors needed for the
+requested fields and receive a filtered response. Both latency and
+payload size shrink proportionally to the number of extractors skipped.
+
+Example — barcode grade + spot colours only::
+
+    POST /v1/extract
+    X-Codex-Fields: detected_barcodes, color_spaces
+
+The server maps the requested names to extractor groups:
+
+- ``color_spaces`` / ``spot_colors`` (alias) → pikepdf colour-world
+  extractor (output intents + spot colorants).
+- ``detected_barcodes`` → AI barcodes signal (CPU-only via
+  pyzbar + pylibdmtx — no Claude calls).
+- ``fonts`` / ``images`` / ``annotations`` → PyMuPDF sub-passes.
+- ``ocgs`` → pikepdf OCG extractor.
+- ``form_xobjects`` → pikepdf forms extractor.
+- ``analysis`` → pikepdf content-stream signals extractor.
+- ``detected_language`` / ``detected_logos`` / ``detected_symbols``
+  / ``spell_candidates`` / ``trap_zone_candidates`` → respective AI
+  signal kinds (Claude / vision).
+- ``document_classification`` → document-level AI classification.
+
+The fitz structure pass always runs (it provides the core document
+shape). pikepdf passes are skipped when no requested field depends on
+them. The AI signal lane is bypassed entirely when no AI-derived field
+is requested.
+
+New module: ``codex_pdf.extract.sparse`` — field→group mapping,
+``resolve_groups()``, ``resolve_ai_kinds()``, ``filter_document_payload()``.
+
+New function: ``codex_pdf.extract.extract_document_sparse()`` — same
+interface as ``extract_document()`` but accepts a ``fields`` set and
+skips unneeded pikepdf passes.
+
+``run_signals_on_document()`` gains optional ``kinds`` parameter to
+filter which AI signal kinds run.
+
+Omitting ``X-Codex-Fields`` returns the full document (unchanged
+default behaviour — no breaking change).
+
+TypeScript client bump to 1.17.0: ``extract()`` now accepts optional
+``{ fields?: string[] }`` options; the header is set automatically.
+
 1.17.0 (minor): Effective DPI now uses actual placed image rect.
 
 The previous _estimate_dpi() used full page dimensions as a proxy,
@@ -157,5 +205,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.17.0"
+VERSION = "1.18.0"
 __version__ = VERSION

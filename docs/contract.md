@@ -20,7 +20,7 @@ mode for examples.
 | `GET /v1/version` | meta | render | bare `{version}` |
 | `GET /v1/contract` | meta | render | endpoint inventory + `section_schema_versions` |
 | `GET /v1/schema/{name}` | document | extract | JSON schemas served from `schemas/v1/<name>.schema.json` |
-| `POST /v1/extract`, `POST /extract` | document | extract | multipart PDF or JSON `{url, pdf_sha256}` → CodexDocument |
+| `POST /v1/extract`, `POST /extract` | document | extract | multipart PDF or JSON `{url, pdf_sha256}` → CodexDocument; supports sparse projection via `X-Codex-Fields` header (§ below) |
 | `POST /v1/probe` | document | extract | two-event SSE stream: `probe-min` (instant) + `probe-std` (after secondary parse) |
 | `POST /v1/extract/stream` | document | extract | SSE stream of `phase-1` + `phase-2` extract events; `?granular=1` adds per-section progress |
 | `POST /v1/render/page` | document | render | PNG raster |
@@ -96,6 +96,73 @@ Every per-section response also carries `schema_version` inline
 (e.g. `ColorResolveResponse.schema_version`) so a consumer that
 hits the surface without first calling `/v1/contract` still has the
 information it needs to pick a validator.
+
+## Sparse field projection (1.18.0+)
+
+`POST /v1/extract` accepts an optional `X-Codex-Fields` request header
+containing a comma-separated list of `CodexDocument` field names. When
+present the server runs only the extractors required for those fields
+and returns only those fields in the response, reducing both latency
+and payload size.
+
+```http
+POST /v1/extract
+Content-Type: multipart/form-data
+X-Codex-Fields: detected_barcodes, color_spaces
+```
+
+### Supported field names
+
+| Field name | Maps to | Notes |
+|---|---|---|
+| `pdf_version`, `is_encrypted`, `is_linearized`, `conformance`, `info`, `xmp`, `trapped_flag`, `trap_evidence` | fitz structure pass | Always fast; included for completeness |
+| `pages` | fitz structure pass | Core page geometry; AI sub-fields filtered per request |
+| `fonts` | fitz fonts pass | |
+| `images` | fitz images pass | |
+| `annotations` | fitz annotations pass | |
+| `output_intents` | pikepdf color world | |
+| `color_spaces` / `spot_colors` *(alias)* | pikepdf color world | `spot_colors` resolves to `color_spaces` |
+| `icc_profiles` | pikepdf color world | |
+| `ocgs` | pikepdf OCG pass | |
+| `form_xobjects` | pikepdf forms pass | |
+| `analysis` | pikepdf content-stream signals | Expensive; skipped when not requested |
+| `document_classification` | AI classification | |
+| `detected_language` | AI language signal | Per-page; fitz pages always included |
+| `detected_barcodes` | AI barcodes signal | CPU-only (pyzbar + pylibdmtx); no Claude calls |
+| `detected_logos` | AI logos signal | |
+| `detected_symbols` | AI symbols signal | |
+| `spell_candidates` | AI spell signal | |
+| `trap_zone_candidates` | AI trap-zones signal | |
+| `summary` | derived | Built from whatever was collected; no extra extractor |
+
+### Response shape
+
+The response is a filtered `CodexDocument` containing only the
+requested fields. The following metadata keys are always included
+regardless of the field filter:
+
+- `schema_version`, `codex_version`, `document_id`, `source`
+- `pdf_sha256`, `extraction_warnings`, `stage_durations_ms`
+- `preflight_reports`, `conformance_verdicts`, `ai_status`
+
+Page objects (`pages[*]`) always contain core geometry keys; page
+sub-fields (`detected_barcodes`, etc.) are stripped unless explicitly
+requested.
+
+Omitting `X-Codex-Fields` returns the full document — identical to
+pre-1.18.0 behaviour, no breaking change.
+
+### TypeScript client
+
+```typescript
+// Full extract (unchanged behaviour)
+const doc = await client.extract(pdfBuffer);
+
+// Sparse — only barcode + colour data
+const sparse = await client.extract(pdfBuffer, {
+  fields: ["detected_barcodes", "color_spaces"],
+});
+```
 
 ## Read-only invariants
 
