@@ -40,6 +40,17 @@ order: 2
 4. Render endpoints rasterize pages, separations, TAC heatmaps,
    and OCG-isolated layers via Ghostscript + PyMuPDF.
 
+### Sparse extraction (1.18.0+)
+
+When the caller sends `X-Codex-Fields`, the pipeline runs in sparse
+mode: only the extractors needed for the requested fields execute.
+The PyMuPDF structure pass (step 1) always runs. Heavier pikepdf
+passes (color world, OCGs, forms, content-stream signals) and the AI
+signal lane are each skipped unless a requested field depends on them.
+See [`docs/contract.md`](./contract.md#sparse-field-projection-1180)
+and [`docs/unified-extraction.md`](./unified-extraction.md#sparse-field-projection-1180)
+for the full field→extractor mapping and HTTP example.
+
 ## Primary contract
 
 - Runtime model: `codex_pdf.models.v1.CodexDocument`
