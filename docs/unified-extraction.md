@@ -14,7 +14,7 @@ and any future consumer.
 
 | Verb / Path | Purpose | Cache key |
 | --- | --- | --- |
-| `POST /v1/extract` | First-stop. Returns the full CodexDocument. No field selection. | `(tenant, pdf_hash)` |
+| `POST /v1/extract` | First-stop. Returns the full CodexDocument. Add `X-Codex-Fields` header for sparse projection (1.18.0+). | `(tenant, pdf_hash)` — full only; sparse bypasses cache |
 | `GET /v1/documents/{pdf_hash}/text-regions?page_index=N&dpi=N` | Second-stop. One page's detected regions, in PDF user-space points. | `(tenant, pdf_hash, page_index, dpi)` |
 | `POST /v1/documents/{document_id}/conformance/{profile}` | Compute (or fetch from cache) a conformance verdict. | `(tenant, pdf_hash, profile)` |
 | `GET /v1/documents/{pdf_hash}/renders` | List `(page_index, dpi, color_space)` tuples already in the render cache. | n/a (it's the index) |
@@ -216,6 +216,82 @@ response describing the AI lane's state:
 See [`policies.md`](./policies.md#ai-signals-130) for the full
 warning catalogue, cache-key contract, and the two-backend
 (CPU + Claude default vs optional GPU) policy.
+
+## Sparse field projection (1.18.0+)
+
+Pass `X-Codex-Fields: <comma-separated fields>` on `POST /v1/extract`
+to run only the extractors needed for the requested fields and receive
+only those fields in the response. Both latency and payload size shrink
+proportionally to the number of extractors skipped.
+
+The fitz structure pass (page count, boxes, fonts summary) always runs;
+only the heavier pikepdf passes and the AI signal lane are gated.
+
+### Field → extractor mapping
+
+| Requested field | Extractors skipped when absent |
+| --- | --- |
+| `color_spaces` / `spot_colors` | pikepdf colour-world pass |
+| `detected_barcodes` | pyzbar + pylibdmtx AI lane |
+| `detected_language` | Claude Haiku language AI lane |
+| `detected_logos` | Claude Sonnet vision AI lane |
+| `detected_symbols` | Claude Sonnet vision AI lane |
+| `document_classification` | Claude Haiku classification AI lane |
+| `spell_candidates` | Claude Haiku spell AI lane |
+| `ocgs` | pikepdf OCG pass |
+| `form_xobjects` | pikepdf forms pass |
+| `analysis` | pikepdf content-stream signals pass |
+| `fonts` | PyMuPDF fonts sub-pass |
+| `images` | PyMuPDF images sub-pass |
+| `annotations` | PyMuPDF annotations sub-pass |
+
+Omitting `X-Codex-Fields` returns the full document (unchanged
+default behaviour — no breaking change).
+
+### Caching
+
+Sparse responses are **not cached** — field sets vary too much for
+content-addressed cache keys to be useful. Full-extract responses
+remain cached as before.
+
+### Example
+
+```http
+POST /v1/extract HTTP/1.1
+Content-Type: application/pdf
+Authorization: Bearer <token>
+X-Codex-Fields: detected_barcodes, color_spaces
+
+<pdf bytes>
+```
+
+```ts
+// TypeScript client (1.17.0+)
+import { HttpClient } from "@printwithsynergy/codex-client";
+
+const client = new HttpClient({ baseUrl, bearerToken });
+
+const doc = await client.extract(pdfBytes, {
+    fields: ["detected_barcodes", "color_spaces"],
+});
+// doc contains only color_spaces + detected_barcodes + core metadata
+```
+
+```python
+# Python — raw header
+import httpx
+
+r = httpx.post(
+    "https://codex.example.com/v1/extract",
+    content=pdf_bytes,
+    headers={
+        "Content-Type": "application/pdf",
+        "Authorization": f"Bearer {token}",
+        "X-Codex-Fields": "detected_barcodes,color_spaces",
+    },
+)
+doc = r.json()
+```
 
 ## End-to-end example
 
