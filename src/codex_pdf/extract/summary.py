@@ -168,9 +168,11 @@ def _spot_colors(doc: CodexDocument) -> CodexSummarySpotColorMetrics:
 
 
 def _image_metrics(doc: CodexDocument) -> CodexSummaryImageMetrics:
-    dpi_values: list[float] = []
+    functional_dpi_values: list[float] = []
+    actual_dpi_values: list[float] = []
     below_300 = 0
     largest: tuple[int, int, int] | None = None
+    seen_xrefs: set[str] = set()
 
     for image in doc.images:
         if image.width_px > 0 and image.height_px > 0:
@@ -178,26 +180,45 @@ def _image_metrics(doc: CodexDocument) -> CodexSummaryImageMetrics:
             if largest is None or area > largest[2]:
                 largest = (image.width_px, image.height_px, area)
 
-        if image.effective_resolution_dpi is None:
-            continue
-        avg_dpi = (
-            float(image.effective_resolution_dpi.x_dpi)
-            + float(image.effective_resolution_dpi.y_dpi)
-        ) / 2.0
-        dpi_values.append(avg_dpi)
-        if avg_dpi < 300:
-            below_300 += 1
+        if image.effective_resolution_dpi is not None:
+            avg_dpi = (
+                float(image.effective_resolution_dpi.x_dpi)
+                + float(image.effective_resolution_dpi.y_dpi)
+            ) / 2.0
+            functional_dpi_values.append(avg_dpi)
+            if avg_dpi < 300:
+                below_300 += 1
 
-    if dpi_values:
-        dpi_avg = round(sum(dpi_values) / len(dpi_values), 3)
-        dpi_min = round(min(dpi_values), 3)
+        # actual_dpi is per-XObject (same stored DPI regardless of placement count),
+        # so deduplicate by image_id prefix to avoid skewing the average.
+        xref_key = image.image_id.rsplit("-", 1)[0]
+        if image.stored_resolution_dpi is not None and xref_key not in seen_xrefs:
+            seen_xrefs.add(xref_key)
+            actual_avg = (
+                float(image.stored_resolution_dpi.x_dpi)
+                + float(image.stored_resolution_dpi.y_dpi)
+            ) / 2.0
+            actual_dpi_values.append(actual_avg)
+
+    if functional_dpi_values:
+        dpi_avg = round(sum(functional_dpi_values) / len(functional_dpi_values), 3)
+        dpi_min = round(min(functional_dpi_values), 3)
     else:
         dpi_avg = None
         dpi_min = None
 
+    if actual_dpi_values:
+        actual_dpi_avg = round(sum(actual_dpi_values) / len(actual_dpi_values), 3)
+        actual_dpi_min = round(min(actual_dpi_values), 3)
+    else:
+        actual_dpi_avg = None
+        actual_dpi_min = None
+
     return CodexSummaryImageMetrics(
         dpi_avg=dpi_avg,
         dpi_min=dpi_min,
+        actual_dpi_avg=actual_dpi_avg,
+        actual_dpi_min=actual_dpi_min,
         below_300_dpi=below_300,
         largest_width_px=largest[0] if largest else None,
         largest_height_px=largest[1] if largest else None,

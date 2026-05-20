@@ -1,10 +1,5 @@
 """Package version.
 
-1.18.1 (patch): Set DEBIAN_FRONTEND=noninteractive in both Dockerfile stages.
-Silences the debconf Dialog → Readline → Teletype → Noninteractive fallback
-cascade that appeared in every Railway build log when apt-get ran without a
-controlling TTY.  No functional change to the produced image.
-
 1.18.0 (minor): Tesseract CPU OCR fallback in text_regions.
 
 When PyMuPDF finds no selectable text on a page (outlined glyphs,
@@ -181,5 +176,5 @@ or unreachable Redis service can never crash the codex API.
 1.3.0 (prior): SSRF hardening + /v1/walk/type4 endpoint.
 """
 
-VERSION = "1.18.1"
+VERSION = "1.19.0"
 __version__ = VERSION

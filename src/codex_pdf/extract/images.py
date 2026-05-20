@@ -32,6 +32,28 @@ def _rect_to_bbox(rect: Any) -> CodexBBox | None:
         return None
 
 
+def _stored_dpi_from_xref(doc: Any, xref: int) -> "CodexResolution | None":
+    """Extract the DPI stored in the image file header (JPEG JFIF/EXIF, PNG pHYs, etc.).
+
+    PyMuPDF exposes this as ``xres``/``yres`` on the dict returned by
+    ``doc.extract_image(xref)``.  Values of 0 or 72 are ambiguous (many
+    encoders emit 72 as a default rather than a real measurement) so we
+    return ``None`` for those to avoid polluting the average.
+    """
+    try:
+        info = doc.extract_image(xref)
+        xres = int(info.get("xres", 0))
+        yres = int(info.get("yres", 0))
+        # 0 means "not set"; 72 is the de-facto default emitted by many
+        # encoders that don't embed real resolution metadata, so treat it
+        # as absent.  Values > 72 are genuine stored resolutions.
+        if xres > 72 and yres > 72:
+            return CodexResolution(x_dpi=float(xres), y_dpi=float(yres))
+    except Exception:
+        pass
+    return None
+
+
 def extract_images_fitz(doc: Any) -> list[CodexImage]:
     images: list[CodexImage] = []
     for page_num, page in enumerate(doc, start=1):
@@ -44,6 +66,8 @@ def extract_images_fitz(doc: Any) -> list[CodexImage]:
                 cs_name = str(img[5]) if len(img) > 5 else None
                 filters = str(img[8]) if len(img) > 8 and img[8] is not None else None
                 smask = bool(img[1]) if len(img) > 1 else False
+
+                stored_dpi = _stored_dpi_from_xref(doc, xref) if xref > 0 else None
 
                 # Get actual placement rect(s) — an XObject can appear
                 # multiple times on the same page at different sizes/positions.
@@ -72,6 +96,7 @@ def extract_images_fitz(doc: Any) -> list[CodexImage]:
                                 effective_resolution_dpi=_effective_dpi_from_placed(
                                     width, height, placed_w, placed_h
                                 ),
+                                stored_resolution_dpi=stored_dpi,
                             )
                         )
                 else:
@@ -87,6 +112,7 @@ def extract_images_fitz(doc: Any) -> list[CodexImage]:
                             color_space_id=cs_name,
                             compression=filters,
                             soft_mask=smask,
+                            stored_resolution_dpi=stored_dpi,
                         )
                     )
         except Exception:

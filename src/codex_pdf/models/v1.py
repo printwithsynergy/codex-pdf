@@ -151,7 +151,8 @@ class CodexImage(BaseModel):
     placed_width_pts: float | None = None   # rendered width on page in points
     placed_height_pts: float | None = None  # rendered height on page in points
     bbox_effective: CodexBBox | None = None
-    effective_resolution_dpi: CodexResolution | None = None
+    effective_resolution_dpi: CodexResolution | None = None  # functional (placement-aware) DPI
+    stored_resolution_dpi: CodexResolution | None = None     # actual DPI from image file header
 
 
 class CodexGraphicsStateSnapshot(BaseModel):
@@ -497,8 +498,10 @@ class CodexSummaryCountMetrics(BaseModel):
 
 
 class CodexSummaryImageMetrics(BaseModel):
-    dpi_avg: float | None = None
-    dpi_min: float | None = None
+    dpi_avg: float | None = None      # functional (placement-aware) DPI avg
+    dpi_min: float | None = None      # functional (placement-aware) DPI min
+    actual_dpi_avg: float | None = None  # actual stored DPI avg (from image file header)
+    actual_dpi_min: float | None = None  # actual stored DPI min (from image file header)
     below_300_dpi: int = 0
     largest_width_px: int | None = None
     largest_height_px: int | None = None
