@@ -1,52 +1,23 @@
 """Package version.
 
-1.18.0 (minor): Sparse field projection via X-Codex-Fields header.
+1.18.0 (minor): Tesseract CPU OCR fallback in text_regions.
 
-Callers can now pass ``X-Codex-Fields: <comma-separated field names>``
-on ``POST /v1/extract`` to run only the extractors needed for the
-requested fields and receive a filtered response. Both latency and
-payload size shrink proportionally to the number of extractors skipped.
+When PyMuPDF finds no selectable text on a page (outlined glyphs,
+scanned / image-only pages), ``extract_text_regions_for_page`` now
+falls back to Tesseract OCR via ``pytesseract``. The page is rendered
+to a PIL image at the requested DPI (default 150) and
+``pytesseract.image_to_data`` extracts word-level bboxes, which are
+converted from pixel space back to PDF user-space points (y-axis
+flipped to match PDF convention). Regions emitted by this path carry
+``source="tesseract"`` and a ``confidence`` in [0, 1] derived from
+Tesseract's per-word confidence score.
 
-Example — barcode grade + spot colours only::
+Graceful degradation: missing ``pytesseract`` package or missing
+``tesseract`` system binary both result in an empty list — no
+exception is raised to the caller.
 
-    POST /v1/extract
-    X-Codex-Fields: detected_barcodes, color_spaces
-
-The server maps the requested names to extractor groups:
-
-- ``color_spaces`` / ``spot_colors`` (alias) → pikepdf colour-world
-  extractor (output intents + spot colorants).
-- ``detected_barcodes`` → AI barcodes signal (CPU-only via
-  pyzbar + pylibdmtx — no Claude calls).
-- ``fonts`` / ``images`` / ``annotations`` → PyMuPDF sub-passes.
-- ``ocgs`` → pikepdf OCG extractor.
-- ``form_xobjects`` → pikepdf forms extractor.
-- ``analysis`` → pikepdf content-stream signals extractor.
-- ``detected_language`` / ``detected_logos`` / ``detected_symbols``
-  / ``spell_candidates`` / ``trap_zone_candidates`` → respective AI
-  signal kinds (Claude / vision).
-- ``document_classification`` → document-level AI classification.
-
-The fitz structure pass always runs (it provides the core document
-shape). pikepdf passes are skipped when no requested field depends on
-them. The AI signal lane is bypassed entirely when no AI-derived field
-is requested.
-
-New module: ``codex_pdf.extract.sparse`` — field→group mapping,
-``resolve_groups()``, ``resolve_ai_kinds()``, ``filter_document_payload()``.
-
-New function: ``codex_pdf.extract.extract_document_sparse()`` — same
-interface as ``extract_document()`` but accepts a ``fields`` set and
-skips unneeded pikepdf passes.
-
-``run_signals_on_document()`` gains optional ``kinds`` parameter to
-filter which AI signal kinds run.
-
-Omitting ``X-Codex-Fields`` returns the full document (unchanged
-default behaviour — no breaking change).
-
-TypeScript client bump to 1.17.0: ``extract()`` now accepts optional
-``{ fields?: string[] }`` options; the header is set automatically.
+New optional dependency: ``pytesseract>=0.3.10`` added to the ``[ai]``
+extra in ``pyproject.toml``.
 
 1.17.0 (minor): Effective DPI now uses actual placed image rect.
 

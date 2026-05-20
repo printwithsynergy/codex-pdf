@@ -45,6 +45,10 @@ ai = [
     # symbols, barcodes). Already a transitive dep via PyMuPDF in many
     # environments; listed explicitly so [ai] is self-contained.
     "Pillow>=10.0",
+    # pytesseract for CPU OCR fallback in text_regions (outlined/image pages).
+    # Requires the ``tesseract`` system binary at runtime; absent binary
+    # degrades gracefully (empty list returned, no exception raised).
+    "pytesseract>=0.3.10",
 ]
 ai-barcodes = [
     # Pure-CPU barcode decoders. Native libraries (zbar, libdmtx) must
