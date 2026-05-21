@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from codex_pdf.models.v1 import CodexBBox, CodexImage, CodexResolution
+from codex_pdf.models.v1 import CodexBBox, CodexFinding, CodexImage, CodexResolution
+
+_LOW_DPI_ERROR_THRESHOLD = 150
+_LOW_DPI_WARN_THRESHOLD = 300
 
 
 def _effective_dpi_from_placed(
@@ -52,6 +55,41 @@ def _stored_dpi_from_xref(doc: Any, xref: int) -> "CodexResolution | None":
     except Exception:
         pass
     return None
+
+
+def collect_low_dpi_findings(images: list[CodexImage]) -> list[CodexFinding]:
+    """Emit a CodexFinding for each placed image below the DPI thresholds."""
+    findings: list[CodexFinding] = []
+    for img in images:
+        res = img.effective_resolution_dpi
+        if res is None:
+            continue
+        actual_dpi = min(res.x_dpi, res.y_dpi)
+        if actual_dpi >= _LOW_DPI_WARN_THRESHOLD:
+            continue
+        severity = "error" if actual_dpi < _LOW_DPI_ERROR_THRESHOLD else "warning"
+        bbox = None
+        if img.bbox_effective is not None:
+            b = img.bbox_effective
+            bbox = (b.x0, b.y0, b.x1, b.y1)
+        stored = img.stored_resolution_dpi
+        findings.append(
+            CodexFinding(
+                id=f"low_dpi-{img.image_id}",
+                type="low_dpi",
+                severity=severity,
+                page=img.page_num,
+                bbox=bbox,
+                message=f"Image effective resolution {actual_dpi:.0f} DPI is below the {_LOW_DPI_WARN_THRESHOLD} DPI threshold.",
+                code=f"LOW_DPI_{actual_dpi:.0f}",
+                data={
+                    "actual_dpi": round(actual_dpi, 1),
+                    "stored_dpi": round(min(stored.x_dpi, stored.y_dpi), 1) if stored else None,
+                    "image_id": img.image_id,
+                },
+            )
+        )
+    return findings
 
 
 def extract_images_fitz(doc: Any) -> list[CodexImage]:
