@@ -21,24 +21,24 @@ _EXTRACT_POOL = ThreadPoolExecutor(
 
 from codex_pdf.models.v1 import (
     CodexDocument,
+    CodexFinding,
     CodexInfoDict,
     CodexSourceRef,
     CodexXmpPacket,
 )
 from codex_pdf.version import __version__
-from codex_pdf.extract.annotations import extract_annotations_fitz
+from codex_pdf.extract.annotations import collect_annotation_findings, extract_annotations_fitz
 from codex_pdf.extract.color import extract_color_world_pikepdf
 from codex_pdf.extract.content_inventory import extract_page_inventory_fitz
 from codex_pdf.extract.fonts import extract_fonts_fitz
 from codex_pdf.extract.forms import extract_forms_pikepdf
-from codex_pdf.extract.images import extract_images_fitz
+from codex_pdf.extract.images import collect_low_dpi_findings, extract_images_fitz
 from codex_pdf.extract.ocg import extract_ocgs_pikepdf
 from codex_pdf.extract.signals import extract_analysis_signals_pikepdf
 from codex_pdf.extract.structure import (
     conformance_claims_from_metadata,
     extract_structure_fitz,
 )
-from codex_pdf.extract.findings import collect_document_findings
 from codex_pdf.extract.summary import build_document_summary
 from codex_pdf.extract.trapping import derive_trapped_flag, extract_trap_evidence
 from codex_pdf.extract.transparency import extract_transparency_fitz
@@ -52,6 +52,88 @@ from codex_pdf.extract.transparency import extract_transparency_fitz
 # stream-backed handle parses the xref table once; subsequent extractor calls
 # reuse that parsed state.
 # ---------------------------------------------------------------------------
+
+
+def _collect_signal_findings(doc: "CodexDocument") -> list["CodexFinding"]:
+    """Wrap per-page AI signals as CodexFinding entries."""
+    findings: list[CodexFinding] = []
+    for page in doc.pages:
+        pnum = page.page_num
+        for logo in page.detected_logos:
+            b = logo.bbox
+            findings.append(CodexFinding(
+                id=f"logo-p{pnum}-{logo.identity or 'unknown'}",
+                type="logo",
+                severity="info",
+                page=pnum,
+                bbox=(b.x0, b.y0, b.x1, b.y1),
+                message=f"Logo detected: {logo.identity or 'unidentified'} (confidence {logo.confidence:.0%}).",
+                data={"identity": logo.identity, "confidence": logo.confidence, "source": logo.source},
+            ))
+        for barcode in page.detected_barcodes:
+            b = barcode.bbox
+            findings.append(CodexFinding(
+                id=f"barcode-p{pnum}-{barcode.format}-{barcode.value[:12]}",
+                type="barcode",
+                severity="info",
+                page=pnum,
+                bbox=(b.x0, b.y0, b.x1, b.y1),
+                message=f"Barcode detected: {barcode.format} — {barcode.value[:40]}.",
+                data={"format": barcode.format, "value": barcode.value, "confidence": barcode.confidence},
+            ))
+        for sym in page.detected_symbols:
+            b = sym.bbox
+            findings.append(CodexFinding(
+                id=f"symbol-p{pnum}-{sym.kind}",
+                type="symbol",
+                severity="info",
+                page=pnum,
+                bbox=(b.x0, b.y0, b.x1, b.y1),
+                message=f"Symbol detected: {sym.kind} (confidence {sym.confidence:.0%}).",
+                data={"kind": sym.kind, "confidence": sym.confidence, "source": sym.source},
+            ))
+        for idx, tz in enumerate(page.trap_zone_candidates):
+            if tz.polygon_pt:
+                xs = [p[0] for p in tz.polygon_pt]
+                ys = [p[1] for p in tz.polygon_pt]
+                bbox = (min(xs), min(ys), max(xs), max(ys))
+            else:
+                bbox = None
+            findings.append(CodexFinding(
+                id=f"trap_zone-p{pnum}-{idx}",
+                type="trap_zone",
+                severity="advisory",
+                page=pnum,
+                bbox=bbox,
+                message=f"Trap zone candidate: {tz.content_type} ({tz.from_ink} → {tz.to_ink}).",
+                data={"content_type": tz.content_type, "from_ink": tz.from_ink, "to_ink": tz.to_ink, "confidence": tz.confidence},
+            ))
+    return findings
+
+
+def _collect_dieline_finding(doc: "CodexDocument") -> list["CodexFinding"]:
+    """Emit a single CodexFinding for the detected dieline region, if available."""
+    if doc.summary is None:
+        return []
+    size = doc.summary.dieline.size
+    if not size.available or size.width_pt is None or size.height_pt is None:
+        return []
+    x0 = size.x0_pt or 0.0
+    y0 = size.y0_pt or 0.0
+    # Determine the page number from the dieline candidates (first candidate wins).
+    page = 1
+    if doc.summary.dieline.candidates:
+        # Candidates don't carry page directly; use page 1 as default.
+        pass
+    return [CodexFinding(
+        id="dieline",
+        type="dieline",
+        severity="info",
+        page=page,
+        bbox=(x0, y0, x0 + size.width_pt, y0 + size.height_pt),
+        message=f"Dieline detected: {size.width_mm:.1f} × {size.height_mm:.1f} mm (confidence {size.confidence:.0%}).",
+        data={"width_mm": size.width_mm, "height_mm": size.height_mm, "confidence": size.confidence, "source": size.source},
+    )]
 
 
 def _fitz_open(raw: bytes):
@@ -196,7 +278,6 @@ def assemble_codex_document(
         pages=fitz_data["pages"],
     )
     doc.summary = build_document_summary(doc)
-    doc.findings = collect_document_findings(doc)
     # Detected text regions are populated for every page on the full
     # extract path. Failures are swallowed per page so a tricky PDF
     # never aborts the whole extract.
@@ -204,6 +285,17 @@ def assemble_codex_document(
         from codex_pdf.extract.text_regions import populate_detected_text_regions
 
         populate_detected_text_regions(pdf_bytes, doc.pages)
+    except Exception:
+        pass
+    # Collect canonical findings from all extractors. Failures are
+    # swallowed so a bad extractor never drops the whole document.
+    try:
+        doc.findings = [
+            *collect_low_dpi_findings(doc.images),
+            *collect_annotation_findings(doc.annotations),
+            *_collect_signal_findings(doc),
+            *_collect_dieline_finding(doc),
+        ]
     except Exception:
         pass
     return doc
@@ -388,7 +480,6 @@ def extract_document_fast(pdf_bytes: bytes, *, source_uri: str | None = None) ->
         pages=fitz_data["pages"],
     )
     result.summary = build_document_summary(result)
-    result.findings = collect_document_findings(result)
     return result
 
 
