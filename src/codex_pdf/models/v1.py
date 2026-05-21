@@ -436,18 +436,20 @@ class CodexIssue(BaseModel):
 
 
 class CodexFinding(BaseModel):
-    """A positioned visual finding emitted by a codex extractor.
+    """Canonical finding shape — used across all ecosystem products.
 
-    Every visual check that can be located on a page MUST populate ``bbox``.
-    The only valid exception is a truly document-level issue with no page
-    anchor — in that case set ``bbox=None`` but still provide ``page``.
+    ``page`` is always 1-indexed.  ``bbox`` is ``(x0, y0, x1, y1)`` in PDF
+    points (origin bottom-left per PDF spec); ``None`` only for document-level
+    findings that have no canvas location.  ``severity`` vocabulary matches
+    ``OverlayItem.tier`` in lens-pdf so findings can be passed directly to
+    ``fromCodexFindings()`` without remapping.
     """
 
     id: str
-    type: str   # "low_dpi" | "dieline" | "annotation" | "logo" | "barcode" | "symbol" | "trap_zone"
+    type: str
     severity: Literal["error", "warning", "advisory", "info"]
-    page: int   # 1-indexed
-    bbox: tuple[float, float, float, float] | None = None   # (x0, y0, x1, y1) in PDF points
+    page: int
+    bbox: tuple[float, float, float, float] | None = None
     message: str
     code: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
@@ -667,11 +669,9 @@ class CodexDocument(BaseModel):
     annotations: list[CodexAnnotation] = Field(default_factory=list)
     analysis: dict[str, Any] = Field(default_factory=dict)
     summary: CodexDocumentSummary | None = None
+    findings: list[CodexFinding] = Field(default_factory=list)
     preflight_reports: list[CodexPreflightReport] = Field(default_factory=list)
     extraction_warnings: list[CodexWarning] = Field(default_factory=list)
-    # Positioned visual findings emitted by codex extractors. Populated after
-    # all extractors run via ``collect_document_findings(doc)``.
-    findings: list[CodexFinding] = Field(default_factory=list)
     # Empty until a verdict has been requested via
     # ``POST /v1/documents/{document_id}/conformance/{profile}``. Keys
     # are :data:`ConformanceProfile` literals; consumers must treat
