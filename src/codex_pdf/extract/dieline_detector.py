@@ -309,6 +309,8 @@ def _estimate_dieline_size(
         confidence_basis = "unavailable"
     return CodexSummaryDielineSizeMetrics(
         available=size_available,
+        x0_pt=round(x0, 3) if size_available else None,
+        y0_pt=round(y0, 3) if size_available else None,
         width_pt=round(width_pt, 3),
         height_pt=round(height_pt, 3),
         width_mm=round(width_pt * 25.4 / 72.0, 3),
