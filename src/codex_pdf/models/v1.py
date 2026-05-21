@@ -435,6 +435,24 @@ class CodexIssue(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class CodexFinding(BaseModel):
+    """A positioned visual finding emitted by a codex extractor.
+
+    Every visual check that can be located on a page MUST populate ``bbox``.
+    The only valid exception is a truly document-level issue with no page
+    anchor — in that case set ``bbox=None`` but still provide ``page``.
+    """
+
+    id: str
+    type: str   # "low_dpi" | "dieline" | "annotation" | "logo" | "barcode" | "symbol" | "trap_zone"
+    severity: Literal["error", "warning", "advisory", "info"]
+    page: int   # 1-indexed
+    bbox: tuple[float, float, float, float] | None = None   # (x0, y0, x1, y1) in PDF points
+    message: str
+    code: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class CodexPreflightReport(BaseModel):
     report_id: str
     source_engine: Literal["lintPDF", "callas", "PitStop", "Acrobat", "other"]
@@ -588,6 +606,8 @@ class CodexSummaryDielineCandidate(BaseModel):
 
 class CodexSummaryDielineSizeMetrics(BaseModel):
     available: bool = False
+    x0_pt: float | None = None
+    y0_pt: float | None = None
     width_pt: float | None = None
     height_pt: float | None = None
     width_mm: float | None = None
@@ -649,6 +669,9 @@ class CodexDocument(BaseModel):
     summary: CodexDocumentSummary | None = None
     preflight_reports: list[CodexPreflightReport] = Field(default_factory=list)
     extraction_warnings: list[CodexWarning] = Field(default_factory=list)
+    # Positioned visual findings emitted by codex extractors. Populated after
+    # all extractors run via ``collect_document_findings(doc)``.
+    findings: list[CodexFinding] = Field(default_factory=list)
     # Empty until a verdict has been requested via
     # ``POST /v1/documents/{document_id}/conformance/{profile}``. Keys
     # are :data:`ConformanceProfile` literals; consumers must treat
