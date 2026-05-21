@@ -140,12 +140,67 @@ export interface ExtractStreamCallbacks {
  *
  * @public
  */
+/** Bounding box in PDF points (origin at bottom-left). */
+export interface CodexBBox {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/** A positioned visual finding emitted by a codex extractor. */
+export interface CodexFinding {
+  readonly id: string;
+  /** "low_dpi" | "dieline" | "annotation" | "logo" | "barcode" | "symbol" | "trap_zone" */
+  readonly type: string;
+  readonly severity: "error" | "warning" | "advisory" | "info";
+  /** 1-indexed page number. */
+  readonly page: number;
+  /** Bounding box in PDF points, or null for document-level findings. */
+  readonly bbox: [number, number, number, number] | null;
+  readonly message: string;
+  readonly code?: string | null;
+  readonly data?: Record<string, unknown>;
+}
+
+export interface CodexSummaryDielineSize {
+  readonly available: boolean;
+  /** PDF-space origin of the detected dieline rect (x, bottom-left). */
+  readonly x0_pt?: number | null;
+  /** PDF-space origin of the detected dieline rect (y, bottom-left). */
+  readonly y0_pt?: number | null;
+  readonly width_pt?: number | null;
+  readonly height_pt?: number | null;
+  readonly width_mm?: number | null;
+  readonly height_mm?: number | null;
+  readonly width_in?: number | null;
+  readonly height_in?: number | null;
+  readonly source?: string;
+  readonly confidence?: number;
+}
+
+export interface CodexSummaryDieline {
+  readonly count: number;
+  readonly overall_confidence: number;
+  readonly size: CodexSummaryDielineSize;
+  readonly candidates: ReadonlyArray<{ readonly name: string; readonly source: string }>;
+}
+
+export interface CodexSummarySpotColorEntry {
+  readonly name: string;
+  readonly swatch_hex: string;
+  readonly swatch_rgb?: [number, number, number];
+  readonly swatch_source?: string;
+}
+
 export interface ExtractResponse {
   readonly pdf_sha256: string;
   /** §16.3: PDF linearization flag (fast web view). */
   readonly is_linearized?: boolean;
   /** §16 Phase C: pre-rendered page 1 at 150 DPI, keyed by render spec. */
   readonly pre_rendered?: Record<string, string>;
+  /** Positioned visual findings from all codex extractors. */
+  readonly findings?: ReadonlyArray<CodexFinding>;
   readonly [key: string]: unknown;
 }
 
