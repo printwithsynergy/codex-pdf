@@ -38,6 +38,7 @@ from codex_pdf.extract.structure import (
     conformance_claims_from_metadata,
     extract_structure_fitz,
 )
+from codex_pdf.extract.findings import collect_document_findings
 from codex_pdf.extract.summary import build_document_summary
 from codex_pdf.extract.trapping import derive_trapped_flag, extract_trap_evidence
 from codex_pdf.extract.transparency import extract_transparency_fitz
@@ -195,6 +196,7 @@ def assemble_codex_document(
         pages=fitz_data["pages"],
     )
     doc.summary = build_document_summary(doc)
+    doc.findings = collect_document_findings(doc)
     # Detected text regions are populated for every page on the full
     # extract path. Failures are swallowed per page so a tricky PDF
     # never aborts the whole extract.
@@ -386,6 +388,7 @@ def extract_document_fast(pdf_bytes: bytes, *, source_uri: str | None = None) ->
         pages=fitz_data["pages"],
     )
     result.summary = build_document_summary(result)
+    result.findings = collect_document_findings(result)
     return result
 
 
